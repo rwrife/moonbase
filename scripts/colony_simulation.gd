@@ -28,6 +28,15 @@ const DELIVERY_PHASE_DELIVER := 5.0
 const DELIVERY_CREDIT_TIME := 5.4
 const STARTER_INITIAL_CYCLE_TIME := 3.2
 
+const SAVE_SCHEMA_VERSION := SaveSchema.CURRENT_VERSION
+const DEFAULT_SITE_SEED := 1972
+const DEFAULT_SCENARIO_ID := "founding_charter"
+
+static var _colony_serial := 0
+
+var colony_id := ""
+var site_seed := DEFAULT_SITE_SEED
+var rng := RandomNumberGenerator.new()
 var buildings: Dictionary = {}
 ## Cells flattened into construction pads (insertion order is grading order).
 var graded: Dictionary = {}
@@ -42,10 +51,18 @@ var deliveries_completed := 0
 var day := 1
 var day_accumulator := 0.0
 var morale := 85.0
+var crew_health := 100.0
+var crew_roles: Dictionary = {}
 var science := 0.0
 var exports := 0.0
+var utility_storage: Dictionary = {}
+var research_unlocked: Array[String] = []
+var research_active := ""
+var research_progress := 0.0
 var crew := 0
 var safe_crew := 0
+var scenario_id := DEFAULT_SCENARIO_ID
+var scenario_flags: Dictionary = {}
 var charter_complete := false
 var last_report := ""
 var next_id := 1
@@ -55,16 +72,33 @@ func _init() -> void:
 	reset()
 
 
-func reset() -> void:
+static func _allocate_colony_id(seed_value: int) -> String:
+	_colony_serial += 1
+	return "colony-%d-%d-%d" % [seed_value, int(Time.get_unix_time_from_system()), _colony_serial]
+
+
+func reset(new_seed: int = DEFAULT_SITE_SEED, new_colony_id: String = "") -> void:
+	site_seed = new_seed
+	colony_id = new_colony_id if not new_colony_id.is_empty() else _allocate_colony_id(site_seed)
+	rng = RandomNumberGenerator.new()
+	rng.seed = site_seed
 	buildings.clear()
 	graded.clear()
 	deliveries.clear()
+	utility_storage.clear()
+	crew_roles.clear()
+	research_unlocked.clear()
+	research_active = ""
+	research_progress = 0.0
+	scenario_id = DEFAULT_SCENARIO_ID
+	scenario_flags.clear()
 	credits = STARTING_CREDITS
 	supplies = 0.0
 	deliveries_completed = 0
 	day = 1
 	day_accumulator = 0.0
 	morale = 85.0
+	crew_health = 100.0
 	science = 0.0
 	exports = 0.0
 	next_id = 1
@@ -80,6 +114,23 @@ func reset() -> void:
 	last_report = "Founding grant received. Supply lander approaching; build reliable power before night."
 	recalculate()
 	changed.emit()
+
+
+func is_fresh_starter_state() -> bool:
+	return (
+		day == 1
+		and is_zero_approx(day_accumulator)
+		and is_equal_approx(credits, STARTING_CREDITS)
+		and is_zero_approx(supplies)
+		and deliveries_completed == 0
+		and is_zero_approx(science)
+		and is_zero_approx(exports)
+		and buildings.size() == 5
+		and graded.size() == 5
+		and next_id == 6
+		and not charter_complete
+	)
+
 
 
 func _add(cell: Vector2i, kind: String) -> int:
@@ -591,17 +642,43 @@ func export_state() -> Dictionary:
 			"cargo_credited": bool(d["cargo_credited"]),
 		})
 	return {
-		"version": 1,
-		"day": day,
-		"day_accumulator": day_accumulator,
-		"credits": credits,
-		"supplies": supplies,
-		"deliveries_completed": deliveries_completed,
-		"morale": morale,
-		"science": science,
-		"exports": exports,
-		"charter_complete": charter_complete,
-		"last_report": last_report,
+		"version": SAVE_SCHEMA_VERSION,
+		"colony_id": colony_id,
+		"site_seed": site_seed,
+		"rng": {
+			"seed": str(rng.seed),
+			"state": str(rng.state),
+		},
+		"time": {
+			"day": day,
+			"day_accumulator": day_accumulator,
+		},
+		"resources": {
+			"supplies": supplies,
+			"science": science,
+			"exports": exports,
+			"storage": utility_storage.duplicate(true),
+		},
+		"economy": {
+			"credits": credits,
+			"deliveries_completed": deliveries_completed,
+		},
+		"crew": {
+			"morale": morale,
+			"health": crew_health,
+			"roles": crew_roles.duplicate(true),
+		},
+		"research": {
+			"unlocked": research_unlocked.duplicate(),
+			"active": research_active,
+			"progress": research_progress,
+		},
+		"scenario": {
+			"id": scenario_id,
+			"charter_complete": charter_complete,
+			"flags": scenario_flags.duplicate(true),
+			"last_report": last_report,
+		},
 		"next_id": next_id,
 		"graded": graded_list,
 		"buildings": building_list,
@@ -610,60 +687,85 @@ func export_state() -> Dictionary:
 
 
 func import_state(state: Dictionary) -> bool:
-	if int(state.get("version", 0)) != 1:
-		return false
+	return bool(import_state_detailed(state)["ok"])
+
+
+func import_state_detailed(raw_state: Variant) -> Dictionary:
+	# Validate and migrate completely before mutating live simulation state.
+	var validated := SaveSchema.migrate_and_validate(raw_state, blocked)
+	if not validated["ok"]:
+		return validated
+	var state: Dictionary = validated["state"]
+	var rng_sec: Dictionary = state["rng"]
+	var time_sec: Dictionary = state["time"]
+	var res_sec: Dictionary = state["resources"]
+	var econ_sec: Dictionary = state["economy"]
+	var crew_sec: Dictionary = state["crew"]
+	var resch_sec: Dictionary = state["research"]
+	var scen_sec: Dictionary = state["scenario"]
+
+	var new_rng := RandomNumberGenerator.new()
+	new_rng.seed = str(rng_sec["seed"]).to_int()
+	new_rng.state = str(rng_sec["state"]).to_int()
+
+	colony_id = str(state["colony_id"])
+	site_seed = int(state["site_seed"])
+	rng = new_rng
+
 	buildings.clear()
 	graded.clear()
 	deliveries.clear()
-	day = int(state.get("day", 1))
-	day_accumulator = clampf(float(state.get("day_accumulator", 0.0)), 0.0, 1.0)
-	credits = float(state.get("credits", STARTING_CREDITS))
-	supplies = float(state.get("supplies", 0.0))
-	deliveries_completed = int(state.get("deliveries_completed", 0))
-	morale = clampf(float(state.get("morale", 85.0)), 0.0, 100.0)
-	science = float(state.get("science", 0.0))
-	exports = float(state.get("exports", 0.0))
-	charter_complete = bool(state.get("charter_complete", false))
-	last_report = str(state.get("last_report", ""))
-	next_id = int(state.get("next_id", 1))
-	for raw_cell: Array in state.get("graded", []):
+
+	day = int(time_sec["day"])
+	day_accumulator = float(time_sec["day_accumulator"])
+	supplies = float(res_sec["supplies"])
+	science = float(res_sec["science"])
+	exports = float(res_sec["exports"])
+	utility_storage = (res_sec["storage"] as Dictionary).duplicate(true)
+	credits = float(econ_sec["credits"])
+	deliveries_completed = int(econ_sec["deliveries_completed"])
+	morale = float(crew_sec["morale"])
+	crew_health = float(crew_sec["health"])
+	crew_roles = (crew_sec["roles"] as Dictionary).duplicate(true)
+	research_unlocked.clear()
+	for tech: String in resch_sec["unlocked"]:
+		research_unlocked.append(tech)
+	research_active = str(resch_sec["active"])
+	research_progress = float(resch_sec["progress"])
+	scenario_id = str(scen_sec["id"])
+	charter_complete = bool(scen_sec["charter_complete"])
+	scenario_flags = (scen_sec["flags"] as Dictionary).duplicate(true)
+	last_report = str(scen_sec["last_report"])
+	next_id = int(state["next_id"])
+
+	for raw_cell: Array in state["graded"]:
 		graded[Vector2i(int(raw_cell[0]), int(raw_cell[1]))] = true
-	for raw_b: Dictionary in state.get("buildings", []):
+	for raw_b: Dictionary in state["buildings"]:
 		var raw_cell: Array = raw_b["cell"]
 		var cell := Vector2i(int(raw_cell[0]), int(raw_cell[1]))
-		var kind := str(raw_b["kind"])
-		if not BuildingCatalog.DATA.has(kind):
-			continue
-		var condition := str(raw_b.get("condition", CONDITION_OPERATIONAL))
-		if not (condition in VALID_CONDITIONS):
-			condition = CONDITION_OPERATIONAL
 		buildings[cell] = {
 			"id": int(raw_b["id"]),
-			"kind": kind,
+			"kind": str(raw_b["kind"]),
 			"active": false,
 			"network": -1,
-			"build_progress": clampf(float(raw_b.get("build_progress", 1.0)), 0.0, 1.0),
-			"condition": condition,
-			"repair_progress": clampf(float(raw_b.get("repair_progress", 1.0)), 0.0, 1.0),
+			"build_progress": float(raw_b["build_progress"]),
+			"condition": str(raw_b["condition"]),
+			"repair_progress": float(raw_b["repair_progress"]),
 		}
 		graded[cell] = true
 		next_id = maxi(next_id, int(raw_b["id"]) + 1)
-	for raw_d: Dictionary in state.get("deliveries", []):
+	for raw_d: Dictionary in state["deliveries"]:
 		var raw_cell: Array = raw_d["cell"]
 		var cell := Vector2i(int(raw_cell[0]), int(raw_cell[1]))
 		var id := int(raw_d["building_id"])
-		if not buildings.has(cell) or int(buildings[cell]["id"]) != id:
-			continue
-		if buildings[cell]["kind"] != "landing_pad":
-			continue
 		var entry := {
 			"building_id": id,
 			"cell": cell,
-			"cycle_time": clampf(float(raw_d.get("cycle_time", 0.0)), 0.0, SUPPLY_DELIVERY_INTERVAL),
+			"cycle_time": float(raw_d["cycle_time"]),
 			"phase": "waiting",
 			"phase_progress": 0.0,
-			"visit_id": int(raw_d.get("visit_id", 1)),
-			"cargo_credited": bool(raw_d.get("cargo_credited", false)),
+			"visit_id": int(raw_d["visit_id"]),
+			"cargo_credited": bool(raw_d["cargo_credited"]),
 		}
 		_refresh_delivery_phase(entry)
 		deliveries[id] = entry
@@ -684,4 +786,10 @@ func import_state(state: Dictionary) -> bool:
 			deliveries[int(b["id"])] = entry
 	recalculate()
 	changed.emit()
-	return true
+	return {
+		"ok": true,
+		"error_code": "",
+		"error": "",
+		"migrated_from": int(validated["migrated_from"]),
+	}
+

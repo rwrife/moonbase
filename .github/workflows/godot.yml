@@ -31,4 +31,5 @@ jobs:
           "$engine" --headless --path . --editor --import 2>&1 | tee /tmp/import.log
           if grep -E 'SCRIPT ERROR|ERROR:' /tmp/import.log; then exit 1; fi
           "$engine" --headless --path . --script tests/test_simulation.gd
+          "$engine" --headless --path . --script tests/test_saves.gd
           "$engine" --headless --path . --script tests/test_scene.gd

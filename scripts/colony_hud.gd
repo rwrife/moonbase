@@ -6,15 +6,25 @@ signal pause_requested
 signal speed_requested(value: int)
 signal restart_requested
 signal camera_requested(command: String)
+signal save_requested
+signal load_requested(slot_id: String)
+signal confirm_overwrite_requested
+signal restore_backup_requested
 
 var stats: Label
 var utilities: Label
 var logistics: Label
+var save_status: Label
 var objective: Label
 var event_log: Label
 var inspector: Label
 var tool_label: Label
 var pause_button: Button
+var save_button: Button
+var load_button: Button
+var load_auto_button: Button
+var confirm_overwrite_button: Button
+var restore_backup_button: Button
 var speed_buttons: Dictionary = {}
 var tool_buttons: Dictionary = {}
 var mode := ""
@@ -34,7 +44,7 @@ func _ready() -> void:
 	panel_style.set_content_margin_all(14)
 	theme.set_stylebox("panel", "PanelContainer", panel_style)
 	root.theme = theme
-	var top := _panel(root, Vector2(0, 0), Vector2(1, 0), Vector4(16, 16, -16, 168))
+	var top := _panel(root, Vector2(0, 0), Vector2(1, 0), Vector4(16, 16, -16, 208))
 	var header := VBoxContainer.new()
 	top.add_child(header)
 	var title := _label("SELENE FRONTIER  /  POLAR OUTPOST", 23)
@@ -62,7 +72,29 @@ func _ready() -> void:
 	controls.add_child(spacer)
 	for command in ["Left", "Right", "Up", "Down", "Orbit -", "Orbit +", "Zoom +", "Zoom -"]:
 		controls.add_child(_button(command, func(): camera_requested.emit(command)))
-	var right := _panel(root, Vector2(1, 0), Vector2(1, 1), Vector4(-310, 212, -16, -110))
+	var save_row := HBoxContainer.new()
+	header.add_child(save_row)
+	save_button = _button("Save", func(): save_requested.emit())
+	save_button.tooltip_text = "Save authoritative colony state to the manual slot."
+	save_row.add_child(save_button)
+	load_button = _button("Load", func(): load_requested.emit(ColonySaveStore.SLOT_MANUAL))
+	load_button.tooltip_text = "Load colony from the manual save slot."
+	save_row.add_child(load_button)
+	load_auto_button = _button("Load Auto", func(): load_requested.emit(ColonySaveStore.SLOT_AUTOSAVE))
+	load_auto_button.tooltip_text = "Load colony from the autosave slot."
+	save_row.add_child(load_auto_button)
+	confirm_overwrite_button = _button("Confirm Overwrite", func(): confirm_overwrite_requested.emit())
+	confirm_overwrite_button.visible = false
+	save_row.add_child(confirm_overwrite_button)
+	restore_backup_button = _button("Restore Backup", func(): restore_backup_requested.emit())
+	restore_backup_button.visible = false
+	save_row.add_child(restore_backup_button)
+	save_status = _label("Saves: ready", 15)
+	save_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	save_status.clip_text = true
+	save_status.add_theme_color_override("font_color", Color(0.68, 0.84, 0.92))
+	save_row.add_child(save_status)
+	var right := _panel(root, Vector2(1, 0), Vector2(1, 1), Vector4(-310, 224, -16, -110))
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	right.add_child(scroll)
@@ -98,7 +130,7 @@ func _ready() -> void:
 	inspector = _label("Click a module to inspect its local utility network.")
 	inspector.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tools.add_child(inspector)
-	var left := _panel(root, Vector2(0, 0), Vector2(0, 0), Vector4(16, 212, 315, 340))
+	var left := _panel(root, Vector2(0, 0), Vector2(0, 0), Vector4(16, 224, 315, 352))
 	var mission := VBoxContainer.new()
 	left.add_child(mission)
 	mission.add_child(_label("FOUNDING CHARTER", 20))
@@ -265,3 +297,20 @@ func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 	var shortages: Array[String] = network["shortages"]
 	lines.append("Shortage: " + ("none" if shortages.is_empty() else ", ".join(shortages)))
 	inspector.text = "\n".join(lines)
+
+
+func update_save_status(message: String, is_error: bool = false,
+		can_confirm_overwrite: bool = false, can_restore_backup: bool = false,
+		confirm_label: String = "Confirm Overwrite",
+		backup_label: String = "Restore Backup") -> void:
+	save_status.text = message
+	save_status.tooltip_text = message
+	save_status.add_theme_color_override(
+		"font_color",
+		Color(1.0, 0.64, 0.42) if is_error else Color(0.68, 0.84, 0.92)
+	)
+	confirm_overwrite_button.text = confirm_label
+	confirm_overwrite_button.visible = can_confirm_overwrite
+	restore_backup_button.text = backup_label
+	restore_backup_button.visible = can_restore_backup
+

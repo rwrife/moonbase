@@ -9,14 +9,18 @@ const DAY_ENERGY := 3.2
 const REGOLITH_SHADER := preload("res://shaders/regolith.gdshader")
 
 var terrain: LunarTerrain
+var current_seed := TERRAIN_SEED
 var terrain_material: ShaderMaterial
+var skirt_material: ShaderMaterial
 var overlay_image: Image
 var overlay_texture: ImageTexture
 var rock_material: StandardMaterial3D
 ## Cell -> Array of [MultiMesh, instance index, Transform3D, sink] for clearable rocks.
 var cell_rocks: Dictionary = {}
 var hidden_rocks: Dictionary = {}
+var rock_nodes: Array[MultiMeshInstance3D] = []
 var boulders: Array[MeshInstance3D] = []
+var graded_order: Array[Vector2i] = []
 var models: Dictionary = {}
 var landers: Dictionary = {}
 var indicators: Dictionary = {}
@@ -141,7 +145,7 @@ func _terrain() -> void:
 	ground.extra_cull_margin = 8.0
 	ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ground)
-	var skirt_material: ShaderMaterial = terrain_material.duplicate()
+	skirt_material = terrain_material.duplicate()
 	skirt_material.set_shader_parameter("far_mode", 1.0)
 	var far := PlaneMesh.new()
 	far.size = Vector2(700, 700)
@@ -221,7 +225,7 @@ func _scatter_rocks() -> void:
 	rock_material.roughness = 1.0
 	rock_material.metallic_specular = 0.08
 	var rng := RandomNumberGenerator.new()
-	rng.seed = TERRAIN_SEED + 99
+	rng.seed = current_seed + 99
 	var limit := LunarTerrain.SIZE * 0.5 - 3.0
 	var placements: Array = [[], [], [], [], []]
 	# Pebble field: mostly uniform with clustering near fresh crater rims.
@@ -251,7 +255,7 @@ func _scatter_rocks() -> void:
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
 		multimesh.use_colors = true
-		multimesh.mesh = _rock_mesh(TERRAIN_SEED + variant * 13, 6 if pebble else 9,
+		multimesh.mesh = _rock_mesh(current_seed + variant * 13, 6 if pebble else 9,
 			4 if pebble else 6)
 		var list: Array = placements[variant]
 		multimesh.instance_count = list.size()
@@ -283,11 +287,12 @@ func _scatter_rocks() -> void:
 		if pebble:
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(instance)
+		rock_nodes.append(instance)
 
 
 func _boulders() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = TERRAIN_SEED + 7
+	rng.seed = current_seed + 7
 	var spots: Array[Vector3] = SiteSurvey.BOULDERS.duplicate()
 	while spots.size() < 22:
 		var at := Vector2(rng.randf_range(-58, 58), rng.randf_range(-58, 58))
@@ -297,13 +302,34 @@ func _boulders() -> void:
 		var spot := spots[index]
 		var boulder := MeshInstance3D.new()
 		boulder.name = "Boulder%d" % index
-		boulder.mesh = _rock_mesh(TERRAIN_SEED + 500 + index, 22, 13)
+		boulder.mesh = _rock_mesh(current_seed + 500 + index, 22, 13)
 		boulder.material_override = rock_material
 		var size := spot.z * 1.6
 		boulder.basis = Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(size, size * 0.9, size))
 		boulder.position = Vector3(spot.x, terrain.height_at(spot.x, spot.y) - size * 0.22, spot.y)
 		add_child(boulder)
 		boulders.append(boulder)
+
+
+func _rebuild_terrain_for_seed(new_seed: int) -> void:
+	current_seed = new_seed
+	for node in rock_nodes:
+		node.queue_free()
+	rock_nodes.clear()
+	cell_rocks.clear()
+	hidden_rocks.clear()
+	for boulder in boulders:
+		boulder.queue_free()
+	boulders.clear()
+	graded_order.clear()
+	terrain.generate(current_seed)
+	for mat in [terrain_material, skirt_material]:
+		mat.set_shader_parameter("height_tex", terrain.height_texture)
+		mat.set_shader_parameter("surface_tex", terrain.surface_texture)
+		mat.set_shader_parameter("detail_normal", terrain.detail_normal)
+		mat.set_shader_parameter("detail_albedo", terrain.detail_albedo)
+	_scatter_rocks()
+	_boulders()
 
 
 func pad_height(cell: Vector2i) -> float:
@@ -315,12 +341,18 @@ func surface_position(cell: Vector2i) -> Vector3:
 
 
 func _sync_terrain(simulation: ColonySimulation) -> void:
-	var stale := false
-	for cell: Vector2i in terrain.pad_targets:
-		if not simulation.graded.has(cell):
-			stale = true
+	if simulation.site_seed != current_seed:
+		_rebuild_terrain_for_seed(simulation.site_seed)
+	var desired_order: Array = simulation.graded.keys()
+	var stale := desired_order.size() < graded_order.size()
+	if not stale:
+		for i in range(graded_order.size()):
+			if desired_order[i] != graded_order[i]:
+				stale = true
+				break
 	if stale:
 		terrain.restore()
+		graded_order.clear()
 		hidden_rocks.clear()
 		for cell: Vector2i in cell_rocks:
 			for entry: Array in cell_rocks[cell]:
@@ -329,6 +361,7 @@ func _sync_terrain(simulation: ColonySimulation) -> void:
 		if terrain.pad_targets.has(cell):
 			continue
 		terrain.grade(cell, CELL_SIZE)
+		graded_order.append(cell)
 		for entry: Array in cell_rocks.get(cell, []):
 			var hidden: Transform3D = entry[2]
 			hidden_rocks[[entry[0], entry[1]]] = true
@@ -372,12 +405,15 @@ func synchronize(simulation: ColonySimulation) -> void:
 			landers.erase(cell)
 	for cell: Vector2i in simulation.buildings:
 		var building: Dictionary = simulation.buildings[cell]
-		if models.has(cell) and models[cell].get_meta("kind") != building["kind"]:
+		if models.has(cell) and (
+			models[cell].get_meta("kind") != building["kind"]
+			or int(models[cell].get_meta("building_id", -1)) != int(building["id"])
+		):
 			models[cell].queue_free()
 			models.erase(cell)
 			indicators.erase(cell)
 		if not models.has(cell):
-			_create_module(cell, building["kind"])
+			_create_module(cell, building["kind"], int(building["id"]))
 		var model: LunarModule = models[cell]
 		model.position = surface_position(cell)
 		model.set_build_progress(float(building.get("build_progress", 1.0)))
@@ -401,9 +437,10 @@ func show_preview(cell: Vector2i, valid: bool, enabled: bool) -> void:
 	preview.material_override = good_material if valid else bad_material
 
 
-func _create_module(cell: Vector2i, kind: String) -> void:
+func _create_module(cell: Vector2i, kind: String, building_id: int = -1) -> void:
 	var model := LunarModule.new()
 	model.build(kind)
+	model.set_meta("building_id", building_id)
 	model.position = surface_position(cell)
 	add_child(model)
 	models[cell] = model

@@ -17,8 +17,8 @@ pressure hulls, thermal insulation, plumbing, radiator fins, solar cells,
 status-driven operating animations, and shared construction, damage, and repair
 visual states. They are **not production/AAA assets**.
 
-Research trees, saves, detailed crew/logistics, hazards beyond night, campaign,
-production art, and audio are future work in [the issue roadmap](docs/ROADMAP.md).
+Research trees, detailed utility storage/crew/logistics, hazards beyond night,
+campaign, production art, and audio are future work in [the issue roadmap](docs/ROADMAP.md).
 
 ## Run
 
@@ -29,11 +29,12 @@ press **F5**. For command-line use:
 godot --path . --editor
 godot --headless --path . --editor --import
 godot --headless --path . --script tests/test_simulation.gd
+godot --headless --path . --script tests/test_saves.gd
 godot --headless --path . --script tests/test_scene.gd
 ```
 
 Substitute `godot4` if that is your executable name. Import before running tests
-on a fresh checkout. The pinned CI workflow imports and runs both test scripts.
+on a fresh checkout. The pinned CI workflow imports and runs all three test scripts.
 Render look-development screenshots (needs a display, e.g. `xvfb-run -a`) with
 `godot --path . --script tests/capture_views.gd -- --out <dir>`.
 
@@ -56,7 +57,7 @@ Cancel the tool to inspect a module's **local** utility supply and shortages.
 | Right click / Esc | Cancel construction tool |
 | Space | Pause / resume |
 | 1 / 2 / 3 | Set 1x / 2x / 4x speed |
-| HUD buttons | Tools, camera, pause, speed, restart |
+| HUD buttons | Tools, camera, pause, speed, restart, save/load & backup recovery |
 
 One simulated day takes one second at 1x. Days 21-30 of each artificial 30-day
 cycle are dark; this is a **game rule**, not real lunar illumination. Solar
@@ -64,8 +65,14 @@ arrays stop at night. A reactor, lab, and refinery connected to the starter
 outpost provide a viable founding-charter solution. Keep all crew supplied,
 reach 30 science and 40 exports, and maintain at least 65 morale after day 30.
 
-There is no save system or hard game-over yet. Restarting/closing resets the
-colony. Long background gaps are ignored instead of fast-forwarding disasters.
+Colony state persists using a versioned data-only JSON schema (v2, with v1
+migration) to `user://saves` on desktop (atomic temporary writes + `.bak`
+backups) and `localStorage` on Web (with `visibilitychange`/`pagehide` lifecycle
+autosave). Autosave runs every 5 days and on charter completion, and refuses to
+silently overwrite a different colony after Restart without explicit confirmation.
+Corrupt, unsupported-version, quota-exceeded, and storage-denied errors preserve
+existing files and surface actionable HUD recovery controls instead of resetting.
+Long background gaps are ignored instead of fast-forwarding disasters.
 
 ## Exports
 

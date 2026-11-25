@@ -35,10 +35,12 @@ func run() -> void:
 	root.add_child(game)
 	game.set_process(false)
 	await process_frame
+	game.configure_save_store(ColonySaveStore.new(SaveStorageBackend.MemoryBackend.new()))
 	check(game.site.models.size() == 5, "Scene must display starter modules including landing pad")
 	check_module_visuals(game)
 	check_structure_states(game)
 	await check_landing_pad_and_supply_ships(game)
+	await check_save_load_and_recovery_ui(game)
 	check(game.camera_rig.camera.projection == Camera3D.PROJECTION_ORTHOGONAL,
 		"Gameplay camera must be orthographic")
 	for entry in [
@@ -426,3 +428,111 @@ func module_bounds(node: Node3D, model: LunarModule) -> AABB:
 		if child is Node3D:
 			bounds = bounds.merge(module_bounds(child, model))
 	return bounds
+
+
+func check_save_load_and_recovery_ui(game: ColonyGame) -> void:
+	var mem := SaveStorageBackend.MemoryBackend.new()
+	game.configure_save_store(ColonySaveStore.new(mem))
+	game.restart()
+	await process_frame
+
+	# Lifecycle suspend on untouched starter colony must not create a noisy autosave.
+	var fresh_suspend := game.on_lifecycle_suspend()
+	check(not fresh_suspend["ok"] and fresh_suspend["error_code"] == "skipped_fresh",
+		"Lifecycle suspend must skip autosave on untouched Day 1 starter colony")
+
+	# Build Colony A, grade terrain, advance time past an autosave milestone, and manually save via HUD.
+	var colony_a_id := game.simulation.colony_id
+	check(game.simulation.place("reactor", Vector2i(0, 1)), "Place Colony A reactor")
+	check(game.simulation.bulldoze(Vector2i(4, -4)), "Grade Colony A extra pad")
+	game.set_speed(4)
+	for i in range(6):
+		game.advance(0.25) # +6 days -> Day 7, triggers interval autosave
+	check(game.simulation.day == 7, "Colony A should reach Day 7")
+	check(mem.key_exists(ColonySaveStore.primary_key(ColonySaveStore.SLOT_AUTOSAVE)),
+		"Reaching autosave interval must populate autosave slot")
+
+	await click(game.hud.save_button.get_global_rect().get_center())
+	check(game.last_save_result["ok"], "HUD Save button must save Colony A")
+	check("Saved colony (Day 7)" in game.hud.save_status.text, "HUD must report successful manual save")
+
+	# Mutate Colony A further (Day 10 + extra lab), save again to create Day 7 backup.
+	check(game.simulation.place("lab", Vector2i(1, 1)), "Place Colony A lab")
+	for i in range(3):
+		game.advance(0.25) # +3 days -> Day 10
+	game.hud.save_button.pressed.emit()
+	check(game.last_save_result["ok"] and mem.key_exists(ColonySaveStore.backup_key(ColonySaveStore.SLOT_MANUAL)),
+		"Second manual save must rotate previous save into backup")
+
+	# Restart starts Colony B without overwriting Colony A's manual or autosave slots.
+	game.restart()
+	await process_frame
+	check(game.simulation.colony_id != colony_a_id and game.site.models.size() == 5,
+		"Restart must create a distinct new colony and restore starter visuals")
+	check(not game.site.terrain.pad_targets.has(Vector2i(4, -4)),
+		"Restart must clear Colony A graded pad")
+
+	# Attempting to save Colony B over Colony A must be blocked and show Confirm Overwrite button.
+	game.hud.save_button.pressed.emit()
+	check(not game.last_save_result["ok"] and game.last_save_result["error_code"] == "colony_conflict",
+		"Saving Colony B over Colony A must trigger colony_conflict")
+	check(game.hud.confirm_overwrite_button.visible and "SAVE WARNING:" in game.hud.save_status.text,
+		"HUD must show explicit warning and Confirm Overwrite button on colony conflict")
+
+	# Clicking Load Auto recovers Colony A cleanly in both simulation and 3D scene.
+	game.hud.load_auto_button.pressed.emit()
+	await process_frame
+	check(game.last_save_result["ok"] and game.simulation.colony_id == colony_a_id,
+		"HUD Load Auto must recover Colony A after restart")
+	check(game.site.models.has(Vector2i(0, 1)) and game.site.terrain.pad_targets.has(Vector2i(4, -4)),
+		"Loading save must restore 3D modules and graded terrain pads")
+	check(not game.hud.confirm_overwrite_button.visible,
+		"Successful load must clear pending overwrite prompt")
+
+	# Lifecycle suspend on progressed Colony A updates autosave cleanly.
+	game.advance(0.25)
+	var suspend_res := game.on_lifecycle_suspend()
+	check(suspend_res["ok"], "Lifecycle suspend must autosave progressed same-colony session")
+
+	# Corrupt manual primary: HUD Load must display explicit error + Restore Backup without altering live state.
+	var day_before_corrupt := game.simulation.day
+	mem.store[ColonySaveStore.primary_key(ColonySaveStore.SLOT_MANUAL)] = "{corrupted_json"
+	game.hud.load_button.pressed.emit()
+	check(not game.last_save_result["ok"] and game.last_save_result["error_code"] == "corrupt_json",
+		"Loading corrupt manual save must report corrupt_json")
+	check(game.simulation.day == day_before_corrupt,
+		"Failed corrupt load must not reset or alter active colony")
+	check("LOAD ERROR:" in game.hud.save_status.text and game.hud.restore_backup_button.visible,
+		"HUD must surface corrupt save error and reveal Restore Backup button")
+
+	# Clicking Restore Backup recovers Day 7 snapshot cleanly while preserving corrupt primary.
+	game.hud.restore_backup_button.pressed.emit()
+	await process_frame
+	check(game.last_save_result["ok"] and game.simulation.day == 7,
+		"HUD Restore Backup must load the preserved Day 7 backup")
+	check(mem.store[ColonySaveStore.primary_key(ColonySaveStore.SLOT_MANUAL)] == "{corrupted_json",
+		"Backup restore must keep the corrupt primary preserved")
+
+	# Explicit Confirm Overwrite after restart succeeds and clears prompt.
+	game.restart()
+	await process_frame
+	game.hud.save_button.pressed.emit()
+	check(game.hud.confirm_overwrite_button.visible,
+		"Saving over protected corrupt file must require explicit confirmation")
+	game.hud.confirm_overwrite_button.pressed.emit()
+	check(game.last_save_result["ok"] and not game.hud.confirm_overwrite_button.visible,
+		"Clicking Confirm Overwrite must complete the explicit overwrite")
+
+	# Storage unavailable must be visibly reported in HUD.
+	mem.available = false
+	game.hud.save_button.pressed.emit()
+	check(not game.last_save_result["ok"] and game.last_save_result["error_code"] == "storage_unavailable",
+		"Unavailable storage must fail save cleanly")
+	check("SAVE ERROR:" in game.hud.save_status.text, "Storage denial must be visible in HUD")
+	mem.available = true
+
+	# Reset to clean fresh store for subsequent tests in run().
+	game.configure_save_store(ColonySaveStore.new(SaveStorageBackend.MemoryBackend.new()))
+	game.restart()
+	await process_frame
+

@@ -103,7 +103,7 @@ or in-code TODO lists.
 | 0 | [#2](https://github.com/rwrife/moonbase/issues/2) | Implemented: Godot project, camera, generated-file ignores, presets and reproducible setup |
 | 0 | [#3](https://github.com/rwrife/moonbase/issues/3) | Implemented: isometric colony first playable and founding charter |
 | 0 | [#7](https://github.com/rwrife/moonbase/issues/7) | Tests/CI and export smoke checks implemented; broader platform/performance qualification remains |
-| 1 | [#5](https://github.com/rwrife/moonbase/issues/5) | Versioned saves and recovery |
+| 1 | [#5](https://github.com/rwrife/moonbase/issues/5) | Implemented: versioned saves, migration, atomic writes, backups, overwrite protection and Web storage |
 | 1 | [#6](https://github.com/rwrife/moonbase/issues/6) | Utility storage, capacity, priorities and failure cascades |
 | 1 | [#10](https://github.com/rwrife/moonbase/issues/10) | Forecastable hazards and repairs |
 | 1 | [#20](https://github.com/rwrife/moonbase/issues/20) | Structures: battery, water and oxygen storage visuals |
