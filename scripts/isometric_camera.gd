@@ -7,7 +7,7 @@ var camera: Camera3D
 func _ready() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 33.0
+	camera.size = 24.0
 	camera.position = Vector3(0, 26, 26)
 	camera.rotation_degrees.x = -45.0
 	camera.far = 200.0

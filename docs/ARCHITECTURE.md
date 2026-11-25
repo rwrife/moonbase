@@ -27,10 +27,12 @@ scripts/
   building_catalog.gd           # Building definitions
   colony_simulation.gd          # State, validation, networks, economy and charter
   lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, lighting
+  lunar_module.gd               # Spacecraft-style procedural hardware and active-state animation
   lunar_terrain.gd              # CPU heightfield, craters, grading and GPU textures
   site_survey.gd                # Immovable landmark craters/boulders and blocked cells
 shaders/
   regolith.gdshader             # Displaced regolith, self-shadowing, grading and build overlay
+  module_surface.gdshader       # Quilted thermal blankets and photovoltaic cell detail
   isometric_camera.gd           # Pan, orbit and zoom
   colony_hud.gd                 # Presentation and command signals
 tests/
@@ -62,6 +64,9 @@ Commit script `.gd.uid` sidecars; ignore `.godot/` and generated build outputs.
   so returning to a tab does not suddenly run many unattended days.
 - Pause prevents all state advancement; changing speed changes tick frequency,
   not the amount of output or upkeep per simulation day.
+- `LunarSite` passes each authoritative building's active state to `LunarModule`.
+  The game clock advances cosmetic mechanisms with the same pause, speed, and
+  suspend-gap clamp as simulation time; animations never produce resources.
 - Avoid deep dependencies on Node3D or UI nodes in the simulation so headless
   tests can instantiate it without rendering.
 - Commands validate before modifying state. Failed placement must not charge

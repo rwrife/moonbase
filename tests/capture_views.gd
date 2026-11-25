@@ -24,11 +24,22 @@ func run() -> void:
 	root.add_child(game)
 	game.set_process(false)
 	await process_frame
+	await shoot(game, out + "/initial_gameplay.png")
 	game.hud.visible = false
 	var camera := game.camera_rig
 	camera.rotation_degrees.y = 45
 	camera.camera.size = 34
 	await shoot(game, out + "/overview.png")
+	camera.position = Vector3(-3.45, 0, 0)
+	camera.camera.size = 12
+	await shoot(game, out + "/starter_hardware.png")
+	game.advance(0.25)
+	await shoot(game, out + "/starter_operating.png")
+	game.simulation.day = 21
+	game.simulation.recalculate()
+	game.refresh()
+	await shoot(game, out + "/starter_offline.png")
+	game.restart()
 	camera.camera.size = 13
 	camera.position = Vector3(-10, 0, 12)
 	await shoot(game, out + "/closeup_rough.png")

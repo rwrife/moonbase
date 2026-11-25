@@ -45,7 +45,9 @@ func advance(delta: float) -> void:
 	if paused:
 		return
 	# Ignore long background/suspend gaps instead of fast-forwarding the colony.
-	accumulator += minf(delta, 0.25) * speed
+	var elapsed := minf(delta, 0.25) * speed
+	site.advance_modules(elapsed)
+	accumulator += elapsed
 	while accumulator >= 1.0:
 		accumulator -= 1.0
 		simulation.tick()

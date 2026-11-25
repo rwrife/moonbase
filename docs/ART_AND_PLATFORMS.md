@@ -16,9 +16,21 @@ zoom: after three agent review passes it scored 6/10. Remaining tells are tracke
 for follow-up (smoother crater shadow interiors, rayed ejecta, finer micro-relief,
 and boulder ground contact).
 
-Buildings still use original procedural placeholder shapes. Replace them through
-a consistent scene/asset interface rather than coupling imported meshes to the
-simulation. AAA is a production ambition, not an achieved milestone.
+Buildings use original spacecraft-inspired procedural models: full-pad equipment
+skids, pressure hulls with bolted hatches and portholes, quilted thermal blankets,
+framed solar cells, braced extraction drills, storage tanks, plumbing, and radiator
+fins. Restrained fictional Selene markings avoid implying NASA endorsement.
+The initial camera is closer so the starter outpost reads as substantial hardware.
+
+Powered modules animate solar tracking, extraction drills, life-support pump
+strokes, antenna scanning, conveyor drives, and sequenced equipment telemetry.
+Warm habitat windows, local service lights, and status lamps follow the
+simulation's active state; offline mechanisms stop, and pause/speed apply to all
+operating animations.
+No wind-driven motion, smoke, or exposed glowing reactor cores are used in vacuum.
+These remain procedural prototypes, not photoreal production assets or validated
+engineering designs. `LunarModule` owns the model and operating-state interface,
+keeping replacement assets independent of the simulation.
 
 ## Production asset pipeline
 
@@ -32,8 +44,8 @@ simulation. AAA is a production ambition, not an achieved milestone.
   library. Use reusable rocks, craters, dust decals, and regolith materials.
 - Budget geometry, textures, draw calls, shadows, and particle overdraw against
   measured target hardware. Avoid decorative detail that hides utility problems.
-- Add sound, animations, landing effects, and UI motion only after the core
-  loop and performance envelope are established.
+- Operating animations are implemented; sound, landing effects, and UI motion
+  remain future work.
 
 ## Rendering tiers
 
