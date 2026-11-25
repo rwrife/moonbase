@@ -51,7 +51,7 @@ punishment. A failed connection should identify the upstream cause.
 | Economy | Imports, export contracts, market signals, upkeep, board commitments | Credits, upkeep, automatic refinery exports and periodic grants |
 | Research | Branching technologies, science requirements, field trials | Science accumulation and founding objective only |
 | Logistics | Landing windows, payload mass, depots, rovers, routes, stockpiles | Deferred |
-| Terrain | Polar ice, sunlit ridges, lava tubes, minerals, survey uncertainty | Fixed surveyed grid and ice strip |
+| Terrain | Polar ice, sunlit ridges, lava tubes, minerals, survey uncertainty | Deformable heightfield, bulldozer grading, immovable landmarks, ice strip |
 | Hazards | Solar flares, impacts, dust, failures, warning and repair | Predictable artificial night cycle only |
 | Modes | Tutorial campaign, authored scenarios, configurable sandbox | One founding scenario with continued play |
 | Presentation | Production assets, audio, animation, accessible overlays | Original procedural placeholder geometry and HUD |
@@ -77,7 +77,10 @@ shortages, morale loss, and debt rather than permanent death or a hard game-over
 ### Prototype building specification
 
 All buildings occupy one tile. Orthogonal adjacency connects modules;
-utility links bridge gaps. Construction is instantaneous.
+utility links bridge gaps. Construction is instantaneous and levels its own pad.
+Bulldozing rough regolith into a pad costs 15 credits. Landmark craters and
+boulders from the site survey are immovable and block construction. Vehicles that
+drive out of a home garage and leave permanent tracks are planned in #16.
 
 | Building | Credits | Upkeep/day | Supply or demand |
 | --- | ---: | ---: | --- |

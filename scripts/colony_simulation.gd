@@ -9,8 +9,13 @@ const NEIGHBORS: Array[Vector2i] = [
 	Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN
 ]
 const STARTING_CREDITS := 1800.0
+const BULLDOZE_COST := 15.0
 
 var buildings: Dictionary = {}
+## Cells flattened into construction pads (insertion order is grading order).
+var graded: Dictionary = {}
+## Cells covered by immovable landmark craters or boulders -> "crater" / "boulder".
+var blocked: Dictionary = SiteSurvey.blocked_cells(MAP_RADIUS)
 var networks: Array[Dictionary] = []
 var credits := STARTING_CREDITS
 var day := 1
@@ -30,6 +35,7 @@ func _init() -> void:
 
 func reset() -> void:
 	buildings.clear()
+	graded.clear()
 	credits = STARTING_CREDITS
 	day = 1
 	morale = 85.0
@@ -48,6 +54,7 @@ func reset() -> void:
 
 func _add(cell: Vector2i, kind: String) -> void:
 	buildings[cell] = {"id": next_id, "kind": kind, "active": false, "network": -1}
+	graded[cell] = true
 	next_id += 1
 
 
@@ -70,8 +77,10 @@ func placement_error(kind: String, cell: Vector2i) -> String:
 		return "Outside the surveyed site."
 	if buildings.has(cell):
 		return "This tile is occupied."
+	if blocked.has(cell):
+		return "An immovable %s blocks this tile." % blocked[cell]
 	if kind == "ice" and not has_ice(cell):
-		return "Ice extractors require a blue ice-deposit tile."
+		return "Ice extractors require a frosted ice-deposit tile."
 	if credits < float(BuildingCatalog.definition(kind)["cost"]):
 		return "Insufficient credits."
 	return ""
@@ -86,6 +95,31 @@ func place(kind: String, cell: Vector2i) -> bool:
 	_add(cell, kind)
 	recalculate()
 	report("%s commissioned." % BuildingCatalog.definition(kind)["name"])
+	changed.emit()
+	return true
+
+
+func bulldoze_error(cell: Vector2i) -> String:
+	if not is_inside(cell):
+		return "Outside the surveyed site."
+	if blocked.has(cell):
+		return "An immovable %s cannot be cleared." % blocked[cell]
+	if graded.has(cell):
+		return "This tile is already a graded pad."
+	if credits < BULLDOZE_COST:
+		return "Insufficient credits."
+	return ""
+
+
+## Clears rocks and levels regolith into a pad. Construction grades for free.
+func bulldoze(cell: Vector2i) -> bool:
+	var error := bulldoze_error(cell)
+	if not error.is_empty():
+		report(error)
+		return false
+	credits -= BULLDOZE_COST
+	graded[cell] = true
+	report("Regolith graded into a level pad.")
 	changed.emit()
 	return true
 

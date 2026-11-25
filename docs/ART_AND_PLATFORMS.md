@@ -8,7 +8,15 @@ small pools of warm interior light. Detailed modular habitats should contrast
 with the enormous, empty terrain. Orthographic composition remains readable
 while allowing camera pan, zoom, and quarter-turn rotation.
 
-The foundation uses original procedural shapes. Replace them through
+The terrain targets photoreal orbital lunar imagery. It is crisp and airless (no
+fog, sharp shadows, near-black sky), with a low sun casting long crater shadows.
+Craters range from fresh and bright-rimmed to degraded ghost craters, and rocks
+cluster at crater rims. It was reviewed against a reference photo at a gameplay
+zoom: after three agent review passes it scored 6/10. Remaining tells are tracked
+for follow-up (smoother crater shadow interiors, rayed ejecta, finer micro-relief,
+and boulder ground contact).
+
+Buildings still use original procedural placeholder shapes. Replace them through
 a consistent scene/asset interface rather than coupling imported meshes to the
 simulation. AAA is a production ambition, not an achieved milestone.
 

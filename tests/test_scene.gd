@@ -49,7 +49,7 @@ func run() -> void:
 	check(game.tool == "reactor", "HUD must select construction mode")
 	check(game.simulation.buildings.size() == 4, "UI clicks must not place world modules")
 	var build_screen := game.camera_rig.camera.unproject_position(
-		LunarSite.cell_position(Vector2i(0, 1)))
+		game.site.surface_position(Vector2i(0, 1)))
 	await click(build_screen)
 	check(game.site.models.size() == 5, "Construction must synchronize world visuals")
 	var credits: float = game.simulation.credits
@@ -64,6 +64,25 @@ func run() -> void:
 	game.activate_cell(Vector2i(0, 1))
 	await process_frame
 	check(game.site.models.size() == 4, "Demolition must remove visual module")
+	var pad := Vector2i(4, -4)
+	var rough := game.site.terrain.pad_targets.has(pad)
+	var hidden_before := _visible_rocks(game.site, pad)
+	game.select_tool("bulldoze")
+	check(game.hud.tool_buttons["bulldoze"].button_pressed, "HUD must show bulldoze mode")
+	game.activate_cell(pad)
+	check(not rough and game.site.terrain.pad_targets.has(pad), "Bulldozing must grade the terrain")
+	var level: float = game.site.terrain.pad_targets[pad]
+	var center := LunarSite.cell_position(pad)
+	var flat := true
+	for offset in [Vector2(-0.9, -0.9), Vector2(0.9, 0.9), Vector2(0.9, -0.9), Vector2(0, 0)]:
+		flat = flat and absf(game.site.terrain.height_at(center.x + offset.x, center.z + offset.y) - level) < 0.002
+	check(flat, "Graded pad must be level")
+	check(_visible_rocks(game.site, pad) == 0, "Bulldozing must clear rocks (had %d)" % hidden_before)
+	var blocked: Vector2i = game.simulation.blocked.keys()[0]
+	check(not game.tool_error(blocked).is_empty(), "Preview must reject immovable landmarks")
+	game.select_tool("")
+	game.activate_cell(blocked)
+	check("Immovable" in game.hud.inspector.text, "Inspector must describe immovable terrain")
 	game.toggle_pause()
 	for i in range(8):
 		game.advance(0.25)
@@ -82,6 +101,8 @@ func run() -> void:
 	game.advance(60)
 	check(game.simulation.day == 7, "Background gaps must not fast-forward the colony")
 	game.restart()
+	check(not game.site.terrain.pad_targets.has(pad) and _visible_rocks(game.site, pad) == hidden_before,
+		"Restart must restore undisturbed regolith and rocks")
 	check(game.simulation.day == 1 and game.speed == 1 and not game.paused,
 		"Restart must clear clock, pause, speed and scenario")
 	game.simulation.demolish(Vector2i(0, 0))
@@ -90,10 +111,10 @@ func run() -> void:
 	check(game.site.models[Vector2i(0, 0)].get_meta("kind") == "solar",
 		"Restart must replace visuals when a starter module changed type")
 	var cell := Vector2i(-3, 2)
-	var screen: Vector2 = game.camera_rig.camera.unproject_position(LunarSite.cell_position(cell))
+	var screen: Vector2 = game.camera_rig.camera.unproject_position(game.site.surface_position(cell))
 	check(LunarSite.world_cell(game.ground_point(screen)) == cell, "Camera ray must resolve grid cell")
 	game.camera_command("Orbit +")
-	screen = game.camera_rig.camera.unproject_position(LunarSite.cell_position(cell))
+	screen = game.camera_rig.camera.unproject_position(game.site.surface_position(cell))
 	check(LunarSite.world_cell(game.ground_point(screen)) == cell, "Orbit must preserve grid mapping")
 	game.site.show_preview(cell, false, true)
 	check(game.site.preview.visible and game.site.preview.material_override == game.site.bad_material,
@@ -123,3 +144,12 @@ func run() -> void:
 	if failures == 0:
 		print("PASS: scene, HUD, construction, clock, restart and camera integration")
 	quit(1 if failures else 0)
+
+
+func _visible_rocks(site: LunarSite, cell: Vector2i) -> int:
+	var count := 0
+	for entry: Array in site.cell_rocks.get(cell, []):
+		var transform: Transform3D = entry[0].get_instance_transform(entry[1])
+		if transform.basis.get_scale().x > 0.0001 and LunarSite.world_cell(transform.origin) == cell:
+			count += 1
+	return count

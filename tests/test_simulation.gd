@@ -10,8 +10,9 @@ func _init() -> void:
 	test_economy_and_charter()
 	test_no_crew_production()
 	test_determinism()
+	test_grading_and_landmarks()
 	if failures == 0:
-		print("PASS: placement, topology, cascades, economy, charter and determinism")
+		print("PASS: placement, topology, cascades, economy, charter, determinism and grading")
 	quit(1 if failures else 0)
 
 
@@ -139,3 +140,27 @@ func test_determinism() -> void:
 	check(a.buildings == b.buildings and a.networks == b.networks, "Repeated commands must produce identical networks")
 	check(a.credits == b.credits and a.science == b.science and a.morale == b.morale,
 		"Repeated ticks must produce identical economy and morale")
+
+
+func test_grading_and_landmarks() -> void:
+	var sim := ColonySimulation.new()
+	for cell in [Vector2i(-3, 0), Vector2i(-2, 0), Vector2i(-1, 0), Vector2i(0, 0)]:
+		check(sim.graded.has(cell), "Starter outpost must sit on graded pads")
+	check(not sim.blocked.is_empty(), "Survey must contain immovable landmarks")
+	for cell in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(7, 7), Vector2i(-4, 0)]:
+		check(not sim.blocked.has(cell), "Landmarks must not cover core starter/test cells")
+	var blocked: Vector2i = sim.blocked.keys()[0]
+	var credits := sim.credits
+	check(not sim.place("link", blocked), "Construction must be rejected on immovable features")
+	check(not sim.bulldoze(blocked) and sim.credits == credits, "Bulldozing immovable features must fail for free")
+	check(sim.bulldoze(Vector2i(5, 5)), "Rough regolith must be bulldozable")
+	check(sim.credits == credits - ColonySimulation.BULLDOZE_COST, "Bulldozing must charge its fee")
+	check(not sim.bulldoze(Vector2i(5, 5)) and sim.credits == credits - ColonySimulation.BULLDOZE_COST,
+		"Re-grading a pad must fail without charging")
+	check(sim.place("link", Vector2i(6, 5)) and sim.graded.has(Vector2i(6, 5)),
+		"Construction must grade its own pad")
+	check(not sim.bulldoze(Vector2i(11, 0)), "Bulldozing outside the site must fail")
+	sim.demolish(Vector2i(6, 5))
+	check(sim.graded.has(Vector2i(6, 5)), "Demolition must leave the graded scar")
+	sim.reset()
+	check(not sim.graded.has(Vector2i(5, 5)) and sim.graded.size() == 4, "Reset must restore untouched regolith")

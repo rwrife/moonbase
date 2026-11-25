@@ -6,10 +6,11 @@ isometric 3D camera. **Selene Frontier is a working title, not a cleared tradema
 
 ## Current milestone
 
-The playable foundation includes original procedural lunar terrain, eight
-building types, grid construction and demolition, local utility networks,
+The playable foundation includes a procedural, deformable lunar surface
+(heightfield regolith with craters, rocks, pebbles, immovable landmark craters and
+boulders, and bulldozer grading), eight building types, grid construction and demolition, local utility networks,
 lunar night, crew morale, upkeep, funding, science, exports, and a founding
-charter objective. The visuals are **placeholder art, not AAA-quality assets**.
+charter objective. Buildings are still **placeholder art, not AAA-quality assets**.
 
 Research trees, saves, detailed crew/logistics, hazards beyond night, campaign,
 production art, and audio are future work in [the issue roadmap](docs/ROADMAP.md).
@@ -28,12 +29,17 @@ godot --headless --path . --script tests/test_scene.gd
 
 Substitute `godot4` if that is your executable name. Import before running tests
 on a fresh checkout. The pinned CI workflow imports and runs both test scripts.
+Render look-development screenshots (needs a display, e.g. `xvfb-run -a`) with
+`godot --path . --script tests/capture_views.gd -- --out <dir>`.
 
 ## Play
 
 Select a building in the right panel and click an empty tile. Orthogonally
 adjacent modules and utility links exchange power, water, oxygen, and heat.
-Diagonal neighbors do not connect. Ice extractors require blue ground tiles.
+Diagonal neighbors do not connect. Ice extractors require the frost-tinted ice
+deposit (shown blue in the build-mode grid). **Bulldoze pad** (15 cr) clears rocks
+and levels rough regolith; construction grades its own pad for free. Immovable
+landmark craters and boulders (red in the build grid) cannot be cleared or built on.
 Cancel the tool to inspect a module's **local** utility supply and shortages.
 
 | Control | Action |
@@ -41,7 +47,7 @@ Cancel the tool to inspect a module's **local** utility supply and shortages.
 | WASD / arrow keys | Pan camera |
 | Q / E | Orbit camera |
 | Mouse wheel | Zoom |
-| Left click | Build, demolish, or inspect |
+| Left click | Build, bulldoze, demolish, or inspect |
 | Right click / Esc | Cancel construction tool |
 | Space | Pause / resume |
 | 1 / 2 / 3 | Set 1x / 2x / 4x speed |

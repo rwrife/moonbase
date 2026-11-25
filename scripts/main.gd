@@ -37,9 +37,7 @@ func _process(delta: float) -> void:
 		site.preview.visible = false
 		return
 	var cell := LunarSite.world_cell(point)
-	var valid := simulation.buildings.has(cell) if tool == "demolish" else (
-		simulation.placement_error(tool, cell).is_empty()
-	)
+	var valid := tool_error(cell).is_empty()
 	site.show_preview(cell, valid, simulation.is_inside(cell))
 
 
@@ -53,11 +51,29 @@ func advance(delta: float) -> void:
 		simulation.tick()
 
 
+func tool_error(cell: Vector2i) -> String:
+	match tool:
+		"demolish":
+			return "" if simulation.buildings.has(cell) else "Select an occupied tile to demolish."
+		"bulldoze":
+			return simulation.bulldoze_error(cell)
+	return simulation.placement_error(tool, cell)
+
+
+## Intersects the cursor ray with the displaced terrain by refining against the
+## local surface height a few times (the relief is gentle, so this converges fast).
 func ground_point(screen_position: Vector2) -> Variant:
 	var camera := camera_rig.camera
 	var origin := camera.project_ray_origin(screen_position)
 	var direction := camera.project_ray_normal(screen_position)
-	return Plane(Vector3.UP, 0).intersects_ray(origin, direction)
+	var height := 0.0
+	var point: Variant = null
+	for i in range(4):
+		point = Plane(Vector3.UP, height).intersects_ray(origin, direction)
+		if point == null:
+			return null
+		height = site.terrain.height_at(point.x, point.z)
+	return point
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -83,6 +99,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func activate_cell(cell: Vector2i) -> void:
 	if tool == "demolish":
 		simulation.demolish(cell)
+	elif tool == "bulldoze":
+		simulation.bulldoze(cell)
 	elif not tool.is_empty():
 		simulation.place(tool, cell)
 	else:
@@ -94,6 +112,7 @@ func select_tool(kind: String) -> void:
 	tool = kind
 	hud.set_tool(kind)
 	site.preview.visible = false
+	site.set_overlay(not kind.is_empty())
 
 
 func toggle_pause() -> void:

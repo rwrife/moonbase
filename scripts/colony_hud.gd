@@ -79,6 +79,12 @@ func _ready() -> void:
 		button.custom_minimum_size.y = 36
 		tool_buttons[kind] = button
 		tools.add_child(button)
+	var bulldoze := _button("Bulldoze pad  /  %d cr" % ColonySimulation.BULLDOZE_COST,
+		func(): tool_selected.emit("bulldoze"))
+	bulldoze.tooltip_text = "Clear rocks and level regolith into a construction pad."
+	bulldoze.toggle_mode = true
+	tool_buttons["bulldoze"] = bulldoze
+	tools.add_child(bulldoze)
 	var demolish := _button("Demolish  /  25% refund", func(): tool_selected.emit("demolish"))
 	demolish.toggle_mode = true
 	tool_buttons["demolish"] = demolish
@@ -137,7 +143,8 @@ func set_tool(kind: String) -> void:
 	mode = kind
 	tool_label.text = "Mode: " + (
 		"Inspect" if kind.is_empty() else
-		"Demolish" if kind == "demolish" else BuildingCatalog.definition(kind)["name"]
+		"Demolish" if kind == "demolish" else
+		"Bulldoze" if kind == "bulldoze" else BuildingCatalog.definition(kind)["name"]
 	)
 	for key: String in tool_buttons:
 		tool_buttons[key].set_pressed_no_signal(key == kind)
@@ -163,7 +170,9 @@ func update_state(simulation: ColonySimulation, paused: bool, speed: int,
 	for value: int in speed_buttons:
 		speed_buttons[value].set_pressed_no_signal(value == speed)
 	for kind: String in tool_buttons:
-		if kind != "demolish":
+		if kind == "bulldoze":
+			tool_buttons[kind].disabled = simulation.credits < ColonySimulation.BULLDOZE_COST
+		elif BuildingCatalog.DATA.has(kind):
 			tool_buttons[kind].disabled = (
 				simulation.credits < float(BuildingCatalog.definition(kind)["cost"])
 			)
@@ -172,7 +181,19 @@ func update_state(simulation: ColonySimulation, paused: bool, speed: int,
 
 func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 	if not simulation.buildings.has(cell):
-		inspector.text = "Click a module to inspect its local utility network.\nBlue ground contains ice."
+		if not simulation.is_inside(cell):
+			inspector.text = "Click a module to inspect its local utility network.\nFrosted ground contains ice."
+			return
+		var lines: PackedStringArray = ["Tile %d, %d" % [cell.x, cell.y]]
+		if simulation.blocked.has(cell):
+			lines.append("Immovable %s: cannot be built on." % simulation.blocked[cell])
+		elif simulation.graded.has(cell):
+			lines.append("Graded construction pad.")
+		else:
+			lines.append("Rough regolith: bulldoze or build to level it.")
+		if simulation.has_ice(cell):
+			lines.append("Ice deposit: suitable for an ice extractor.")
+		inspector.text = "\n".join(lines)
 		return
 	var building: Dictionary = simulation.buildings[cell]
 	var data := BuildingCatalog.definition(building["kind"])

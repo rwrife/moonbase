@@ -26,12 +26,17 @@ scripts/
   main.gd                       # Fixed clock, commands and component wiring
   building_catalog.gd           # Building definitions
   colony_simulation.gd          # State, validation, networks, economy and charter
-  lunar_site.gd                 # Procedural visuals and world/grid transforms
+  lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, lighting
+  lunar_terrain.gd              # CPU heightfield, craters, grading and GPU textures
+  site_survey.gd                # Immovable landmark craters/boulders and blocked cells
+shaders/
+  regolith.gdshader             # Displaced regolith, self-shadowing, grading and build overlay
   isometric_camera.gd           # Pan, orbit and zoom
   colony_hud.gd                 # Presentation and command signals
 tests/
   test_simulation.gd           # Headless behavioral tests
   test_scene.gd                # Scene integration smoke tests
+  capture_views.gd             # Look-development screenshot capture (needs a display)
 docs/                          # Design, roadmap, technical and art direction
 .github/
   workflows/                  # Pinned import and headless test checks
@@ -149,3 +154,27 @@ milestone. Update directly related documents when behavior changes. Future
 development uses reviewable pull requests unless the owner gives a task-specific
 publication instruction. The owner's direct-to-main instruction applies to this
 initial setup; it is not an assumed permanent contribution policy.
+
+## Lunar terrain
+
+- `LunarTerrain` builds a 128 x 128 unit heightfield (1024^2 texels, 0.125 units each):
+  macro relief from `FastNoiseLite`, then roughly 2,800 stamped craters. Craters follow
+  a power-law size distribution, and most are degraded (soft bowls, no halo). A few are
+  fresh, with sharp rims and rayed bright ejecta stored in an albedo channel.
+- Heights upload as an `RH` texture, displacing a 512-subdivision plane in
+  `regolith.gdshader`. The shader derives normals from the heightfield, adds rotated
+  tiling micro-crater normals, and ray-marches the heightfield toward the sun for
+  crisp terrain self-shadows (there is no atmosphere, so there is no haze). It uses
+  a Lommel-Seeliger/Lambert regolith BRDF.
+- Rocks and pebbles are MultiMesh instances of procedurally chipped meshes,
+  clustered around fresh crater rims. `LunarSite.cell_rocks` maps cells to the
+  instances that grading hides. Large boulders are separate meshes.
+- `SiteSurvey` defines immovable landmarks. `ColonySimulation.blocked` rejects
+  construction and bulldozing there.
+- Grading: `ColonySimulation.graded` is authoritative and kept in grading order.
+  `LunarSite.synchronize` flattens newly graded cells with `LunarTerrain.grade()`,
+  which levels the cell to its mean height (blended with adjacent pads). It feathers
+  into rough neighbours with a small spoil berm, marks the graded mask, and uploads
+  textures. A reset restores the base heightfield and rocks.
+- Buildings, the preview and cursor picking use the pad or terrain height
+  (`LunarSite.surface_position`, iterative `ColonyGame.ground_point`).
