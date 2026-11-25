@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose scoped work aligned with the game roadmap.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Player problem and proposed scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and validation
+      description: Describe observable outcomes, edge cases, and how to verify them.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and roadmap phase

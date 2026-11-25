@@ -8,10 +8,9 @@ small pools of warm interior light. Detailed modular habitats should contrast
 with the enormous, empty terrain. Orthographic composition remains readable
 while allowing camera pan, zoom, and quarter-turn rotation.
 
-The planned foundation will use original procedural shapes. Replace them through
+The foundation uses original procedural shapes. Replace them through
 a consistent scene/asset interface rather than coupling imported meshes to the
-simulation. AAA is a production ambition, not an achieved milestone. This setup
-contains documentation only; project-file writes were denied.
+simulation. AAA is a production ambition, not an achieved milestone.
 
 ## Production asset pipeline
 
@@ -32,9 +31,9 @@ contains documentation only; project-file writes were denied.
 
 | Tier | Direction | Status |
 | --- | --- | --- |
-| Desktop baseline | Compatibility, simple materials, directional light and shadows | Planned initial project target |
+| Desktop baseline | Compatibility, simple materials, directional light and shadows | Implemented prototype |
 | Desktop high fidelity | Forward+, profiled GI/SSAO/reflections, richer materials, LODs, limited shadowed lights | Future issue |
-| Web | Compatibility/WebGL2, lighter effects, baked lighting where useful, compressed assets, single-thread export | Future preset and runtime qualification required |
+| Web | Compatibility/WebGL2, lighter effects, textures/shadows budgeted separately, single-thread export | Preset and Chromium founding-charter smoke check pass; full qualification remains future work |
 | Native mobile | Mobile renderer or Compatibility would require device profiling, touch UI and smaller budgets | Out of published backlog; feasibility issue creation was denied, support not promised |
 
 Do not describe Godot's **Mobile renderer** as supported by Web: it is a renderer
@@ -75,6 +74,13 @@ These are acceptance targets, not measured results:
 
 Choose reference hardware and collect baseline captures in the desktop/Web
 qualification issue.
-Runtime/export testing was blocked during initial setup because permission to
-download and execute the Godot binary was denied; no visual/performance result
-should be inferred from the existence of a project or export preset.
+After explicit owner approval resolved the initial setup block, Godot 4.7.2
+imports, simulation tests, scene/input integration tests, and a rendered desktop
+smoke test passed. Linux and Web release exports were produced. The rendered
+check used Mesa llvmpipe software rendering, not representative player hardware.
+The HTTP-served Web build completed its founding charter in Chromium at
+1440x900 and remained usable after resizing to 1280x800, with no console errors.
+ReadPixels performance warnings were observed during captures. These checks do
+not establish the proposed performance budgets. Production art, reference-hardware
+measurements, Firefox/lifecycle qualification, and mobile support remain future
+work.

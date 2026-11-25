@@ -1,9 +1,8 @@
 # Technical architecture and implementation guide
 
-**Status:** proposed architecture. This repository currently contains planning
-documents, not a runnable Godot project. Creation of game project files and
-download/execution of the engine were denied in the initial setup environment.
-The foundation and validation issues own that remaining work.
+**Status:** runnable first-playable foundation. The initial permission block was
+resolved by explicit owner approval. The project separates authoritative
+simulation from procedural visuals, camera, construction input, and HUD.
 
 ## Engine baseline
 
@@ -17,49 +16,33 @@ Start with Compatibility rendering on all platforms. Add an optional Forward+
 desktop profile only after the same gameplay scene can run in both profiles.
 See [ART_AND_PLATFORMS.md](ART_AND_PLATFORMS.md).
 
-## Proposed repository structure
+## Current repository structure
 
 ```text
 project.godot                     # Application, main scene, renderer, input actions
 export_presets.cfg               # Linux and single-threaded Web presets
-scenes/
-  main.tscn                     # World, simulation driver, camera, HUD composition
-  world/
-    lunar_site.tscn             # Surveyed terrain and build grid
-    buildings/                 # Replaceable visual scenes for each module
-  ui/
-    colony_hud.tscn             # Resources, tools, selection, alerts, objective
+scenes/main.tscn                 # Composition entry point
 scripts/
-  simulation/
-    colony_state.gd            # Serializable state, no rendering dependencies
-    utility_network.gd         # Connected-component discovery and evaluation
-    economy.gd                 # Funding, upkeep, export accounting
-    simulation_driver.gd       # Fixed ticks, pause, speed, signals
-  construction/
-    building_catalog.gd        # Definitions and validation
-    build_controller.gd        # Preview, placement, demolition, selection
-  world/
-    lunar_site.gd              # Site seed, deposits, world/grid transforms
-    isometric_camera.gd        # Pan, rotate, zoom, bounds
-  ui/
-    colony_hud.gd              # Presentation and command signals
-assets/
-  models/                      # Original or licensed glTF assets
-  materials/
-  audio/
-  licenses/                    # Provenance and attribution
+  main.gd                       # Fixed clock, commands and component wiring
+  building_catalog.gd           # Building definitions
+  colony_simulation.gd          # State, validation, networks, economy and charter
+  lunar_site.gd                 # Procedural visuals and world/grid transforms
+  isometric_camera.gd           # Pan, orbit and zoom
+  colony_hud.gd                 # Presentation and command signals
 tests/
   test_simulation.gd           # Headless behavioral tests
   test_scene.gd                # Scene integration smoke tests
 docs/                          # Design, roadmap, technical and art direction
 .github/
-  workflows/                  # Import, test and eventually export checks
+  workflows/                  # Pinned import and headless test checks
   ISSUE_TEMPLATE/             # Focused bug/feature templates
 ```
 
-This is a target layout, not a requirement to create empty folders or all modules
-immediately. Keep the first implementation small. Extract services when actual
-behavior requires the boundary; do not create an enterprise framework.
+The first implementation is intentionally small; it does not contain empty
+framework folders. Extract separate utility/economy/crew services when future
+behavior warrants the boundary. Imported production assets will get dedicated
+scenes and provenance records rather than coupling them to simulation state.
+Commit script `.gd.uid` sidecars; ignore `.godot/` and generated build outputs.
 
 ## Data and simulation contract
 
@@ -68,8 +51,10 @@ behavior requires the boundary; do not create an enterprise framework.
   those definitions and state.
 - Use explicit units and time steps. The first-playable values are abstract
   units/day. Later physical models must migrate or replace them explicitly.
-- Tick deterministically with a fixed simulation step, independent of render
-  frame rate. Cap catch-up work and keep a documented backlog/skip policy.
+- Tick deterministically with a fixed one-day simulation step, independent of
+  render frame rate. The driver clamps each frame's elapsed time to 250 ms before
+  applying speed. Longer suspend/background gaps are discarded, not replayed,
+  so returning to a tab does not suddenly run many unattended days.
 - Pause prevents all state advancement; changing speed changes tick frequency,
   not the amount of output or upkeep per simulation day.
 - Avoid deep dependencies on Node3D or UI nodes in the simulation so headless
@@ -125,9 +110,9 @@ resources, economy, research, crew, scenario flags, and RNG state.
 Never silently reset corrupt or unsupported saves. Preserve the file and show
 an actionable error. Web storage/persistence must be qualified independently.
 
-## Validation and CI plan
+## Validation and CI
 
-After an authorized engine installation, document and execute:
+On a fresh checkout, execute:
 
 ```sh
 godot --headless --path . --editor --import
@@ -135,8 +120,10 @@ godot --headless --path . --script tests/test_simulation.gd
 godot --headless --path . --script tests/test_scene.gd
 ```
 
-These are **future commands**; there is no `project.godot` or test script yet.
-Use a nonzero exit on assertion or load failure and a timeout in CI.
+Both test scripts return nonzero on failed checks. CI pins the engine version,
+verifies its SHA-512 release checksum, rejects import errors, runs both scripts,
+and has a bounded job timeout. Export/browser/performance qualification remains
+in the validation issue rather than being implied by headless test success.
 
 Behavioral coverage should include:
 

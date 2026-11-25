@@ -10,7 +10,7 @@ of commanding a technically believable lunar settlement without copying the
 **Working title:** Selene Frontier. Trademark clearance is pending.
 **Engine:** Godot 4, standard GDScript build.
 **Primary platform:** desktop. Web is a deliberately lower-cost rendering tier;
-native mobile is a later feasibility milestone.
+native mobile is outside the current implementation and published backlog.
 **Audience:** players who enjoy city builders, engineering, and economic strategy.
 **Current scope:** foundation and prototype, not a complete AAA production.
 
@@ -40,7 +40,7 @@ punishment. A failed connection should identify the upstream cause.
 
 ## Systems breakdown
 
-| System | Intended design | Planned first-playable scope |
+| System | Intended design | Implemented first-playable scope |
 | --- | --- | --- |
 | Construction | Footprints, rotation, terrain constraints, construction jobs, roads, service ports | One-cell modules, adjacency, placement and demolition |
 | Power | Solar illumination, fission, storage, load priorities, cable capacity, redundancy | Solar and reactor supply, connected component demand |
@@ -57,24 +57,24 @@ punishment. A failed connection should identify the upstream cause.
 | Presentation | Production assets, audio, animation, accessible overlays | Original procedural placeholder geometry and HUD |
 
 Utility quantities and building costs below are fictional balance values, not
-NASA engineering predictions or verified original-game numbers. The planned
+NASA engineering predictions or verified original-game numbers. The
 prototype uses one common adjacency graph, not four independently routed
-pipes/cables. **No game project or playable prototype was created in this setup:
-project-file writes and engine installation were denied by the environment.**
+pipes/cables. The runnable foundation was added after the owner explicitly
+approved the previously blocked project-file writes and engine execution.
 
-## Planned first playable: founding charter
+## First playable: founding charter
 
 Start with a small supplied outpost and a construction grant. Add reliable
 night-time generation, science, and exports while maintaining safe habitats.
 The completion condition is day 30 or later, at least 30 science, at least
 40 export units, all crew supplied, and morale of at least 65.
 
-One day advances per second at 1x; pause, 2x, and 4x should be available.
+One day advances per second at 1x; pause, 2x, and 4x are available.
 Days 21-30 of each artificial 30-day cycle are dark. There is no claim that this
-is a faithful lunar illumination model. The initial failure model should produce
+is a faithful lunar illumination model. The initial failure model produces
 shortages, morale loss, and debt rather than permanent death or a hard game-over.
 
-### Proposed prototype building specification
+### Prototype building specification
 
 All buildings occupy one tile. Orthogonal adjacency connects modules;
 utility links bridge gaps. Construction is instantaneous.

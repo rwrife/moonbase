@@ -2,12 +2,17 @@
 
 ## Setup status
 
-The initial setup delivers the project description, architecture, art/platform
-direction, historical-source caveats, and developer backlog. **The game project,
-playable prototype, export presets, tests, and CI are not implemented.**
-Project-file writes and download/execution of the Godot engine were denied in
-the initial environment. Do not mistake the design specification for completed
-features or measured performance.
+The setup now delivers a runnable Godot 4.7.2 first playable, procedural lunar
+terrain, eight building types, construction, camera/HUD, shared utility networks,
+economy, founding charter, Linux/Web presets, behavioral tests and CI, alongside
+the design documents and developer backlog. Explicit owner approval resolved
+the initial game-file/engine permission block.
+
+Production art and deeper strategy remain future work. Imports, simulation and
+scene/input tests, rendered desktop smoke checks, release exports, and an actual
+Chromium founding-charter playthrough have passed; reference-hardware performance,
+Firefox and complete browser lifecycle qualification remain open in the
+validation issue.
 
 GitHub issues are the actionable backlog; this document records sequencing and
 release gates. The issue index below links every published development task.
@@ -19,9 +24,8 @@ camera, building catalog, construction interaction, shared utility simulation,
 economy, HUD, and a founding scenario. Use the first-playable specification in
 [DESIGN.md](DESIGN.md), but adjust balance only with recorded playtest evidence.
 
-Add generated-file ignores, export presets, contribution/issue templates, and
-matching engine setup instructions. Resolve the setup permission limitation in
-an authorized development environment rather than bypassing it.
+Generated-file ignores, export presets, contribution/issue templates, and matching
+engine setup instructions are now present.
 
 **Exit gate:** a fresh checkout imports and runs; the player can build and
 demolish modules, diagnose disconnected utilities, survive night, earn exports
@@ -92,9 +96,9 @@ or in-code TODO lists.
 
 | Phase | Issue | Work |
 | --- | --- | --- |
-| 0 | [#2](https://github.com/rwrife/moonbase/issues/2) | Godot project, camera, generated-file ignores, presets and reproducible setup |
-| 0 | [#3](https://github.com/rwrife/moonbase/issues/3) | Isometric colony first playable and founding charter |
-| 0 | [#7](https://github.com/rwrife/moonbase/issues/7) | Headless tests, CI, desktop/Web qualification and performance baseline |
+| 0 | [#2](https://github.com/rwrife/moonbase/issues/2) | Implemented: Godot project, camera, generated-file ignores, presets and reproducible setup |
+| 0 | [#3](https://github.com/rwrife/moonbase/issues/3) | Implemented: isometric colony first playable and founding charter |
+| 0 | [#7](https://github.com/rwrife/moonbase/issues/7) | Tests/CI and export smoke checks implemented; broader platform/performance qualification remains |
 | 1 | [#5](https://github.com/rwrife/moonbase/issues/5) | Versioned saves and recovery |
 | 1 | [#6](https://github.com/rwrife/moonbase/issues/6) | Utility storage, capacity, priorities and failure cascades |
 | 1 | [#10](https://github.com/rwrife/moonbase/issues/10) | Forecastable hazards and repairs |
@@ -108,6 +112,6 @@ or in-code TODO lists.
 | Release gate | [#1](https://github.com/rwrife/moonbase/issues/1) | Title clearance, licensing, asset provenance and historical verification |
 | 4 | [#15](https://github.com/rwrife/moonbase/issues/15) | Release QA, balancing, packaging and distribution readiness |
 
-The foundation issue owns the blocked initial game-file setup; the validation
-issue owns engine/import/runtime/export qualification. Resolve permissions in
-an authorized environment rather than attempting to bypass the initial denials.
+The foundation and first-playable issues track the implemented setup; the
+validation issue retains the broader browser/performance qualification work.
+Later phases remain explicitly deferred, not implied by the prototype.
