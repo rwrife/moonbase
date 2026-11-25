@@ -18,6 +18,7 @@ var cell_rocks: Dictionary = {}
 var hidden_rocks: Dictionary = {}
 var boulders: Array[MeshInstance3D] = []
 var models: Dictionary = {}
+var landers: Dictionary = {}
 var indicators: Dictionary = {}
 var preview: MeshInstance3D
 var sun: DirectionalLight3D
@@ -365,6 +366,10 @@ func synchronize(simulation: ColonySimulation) -> void:
 			models[cell].queue_free()
 			models.erase(cell)
 			indicators.erase(cell)
+	for cell: Vector2i in landers.keys():
+		if not simulation.buildings.has(cell) or simulation.buildings[cell]["kind"] != "landing_pad":
+			landers[cell].queue_free()
+			landers.erase(cell)
 	for cell: Vector2i in simulation.buildings:
 		var building: Dictionary = simulation.buildings[cell]
 		if models.has(cell) and models[cell].get_meta("kind") != building["kind"]:
@@ -373,8 +378,19 @@ func synchronize(simulation: ColonySimulation) -> void:
 			indicators.erase(cell)
 		if not models.has(cell):
 			_create_module(cell, building["kind"])
-		models[cell].position = surface_position(cell)
-		models[cell].set_active(building["active"])
+		var model: LunarModule = models[cell]
+		model.position = surface_position(cell)
+		model.set_build_progress(float(building.get("build_progress", 1.0)))
+		model.set_condition(
+			str(building.get("condition", ColonySimulation.CONDITION_OPERATIONAL)),
+			float(building.get("repair_progress", 1.0))
+		)
+		model.set_active(building["active"])
+		if building["kind"] == "landing_pad":
+			if not landers.has(cell):
+				_create_lander(cell)
+			landers[cell].position = surface_position(cell)
+	sync_landers(simulation)
 	sun.light_energy = 0.22 if simulation.is_night() else DAY_ENERGY
 	sun.light_color = Color(0.55, 0.66, 1.0) if simulation.is_night() else DAY_COLOR
 
@@ -394,6 +410,20 @@ func _create_module(cell: Vector2i, kind: String) -> void:
 	indicators[cell] = model.status
 
 
-func advance_modules(delta: float) -> void:
+func _create_lander(cell: Vector2i) -> void:
+	var lander := SupplyLander.new()
+	lander.position = surface_position(cell)
+	add_child(lander)
+	landers[cell] = lander
+
+
+func sync_landers(simulation: ColonySimulation) -> void:
+	for cell: Vector2i in landers:
+		landers[cell].apply_delivery(simulation.delivery_for_cell(cell))
+
+
+func advance_modules(delta: float, simulation: ColonySimulation = null) -> void:
 	for model: LunarModule in models.values():
 		model.advance(delta)
+	if simulation != null:
+		sync_landers(simulation)

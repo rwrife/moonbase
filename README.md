@@ -8,11 +8,14 @@ isometric 3D camera. **Selene Frontier is a working title, not a cleared tradema
 
 The playable foundation includes a procedural, deformable lunar surface
 (heightfield regolith with craters, rocks, pebbles, immovable landmark craters and
-boulders, and bulldozer grading), eight building types, grid construction and demolition, local utility networks,
-lunar night, crew morale, upkeep, funding, science, exports, and a founding
-charter objective. Original procedural buildings now feature spacecraft-style
-pressure hulls, thermal insulation, plumbing, radiator fins, solar cells, and
-status-driven operating animations. They are **not production/AAA assets**.
+boulders, and bulldozer grading), nine building types (including a starter landing
+pad with recurring SELENE supply lander visits delivering +4 t supplies every
+6 days per operational pad), grid construction and demolition, local utility
+networks, lunar night, crew morale, upkeep, funding, science, exports, and a
+founding charter objective. Original procedural buildings feature spacecraft-style
+pressure hulls, thermal insulation, plumbing, radiator fins, solar cells,
+status-driven operating animations, and shared construction, damage, and repair
+visual states. They are **not production/AAA assets**.
 
 Research trees, saves, detailed crew/logistics, hazards beyond night, campaign,
 production art, and audio are future work in [the issue roadmap](docs/ROADMAP.md).

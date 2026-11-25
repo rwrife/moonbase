@@ -46,11 +46,10 @@ func advance(delta: float) -> void:
 		return
 	# Ignore long background/suspend gaps instead of fast-forwarding the colony.
 	var elapsed := minf(delta, 0.25) * speed
-	site.advance_modules(elapsed)
-	accumulator += elapsed
-	while accumulator >= 1.0:
-		accumulator -= 1.0
-		simulation.tick()
+	simulation.advance(elapsed)
+	accumulator = simulation.day_accumulator
+	site.advance_modules(elapsed, simulation)
+	hud.update_delivery_status(simulation, selected)
 
 
 func tool_error(cell: Vector2i) -> String:

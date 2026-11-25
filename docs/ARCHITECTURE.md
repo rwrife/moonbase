@@ -25,9 +25,10 @@ scenes/main.tscn                 # Composition entry point
 scripts/
   main.gd                       # Fixed clock, commands and component wiring
   building_catalog.gd           # Building definitions
-  colony_simulation.gd          # State, validation, networks, economy and charter
-  lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, lighting
-  lunar_module.gd               # Spacecraft-style procedural hardware and active-state animation
+  colony_simulation.gd          # State, validation, networks, deliveries, economy, charter and state export/import
+  lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, landers, lighting
+  lunar_module.gd               # Spacecraft-style procedural hardware and shared build/damage/repair/active states
+  supply_lander.gd              # Original SELENE supply lander driven by authoritative delivery state
   lunar_terrain.gd              # CPU heightfield, craters, grading and GPU textures
   site_survey.gd                # Immovable landmark craters/boulders and blocked cells
 shaders/

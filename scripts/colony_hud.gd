@@ -9,6 +9,7 @@ signal camera_requested(command: String)
 
 var stats: Label
 var utilities: Label
+var logistics: Label
 var objective: Label
 var event_log: Label
 var inspector: Label
@@ -33,7 +34,7 @@ func _ready() -> void:
 	panel_style.set_content_margin_all(14)
 	theme.set_stylebox("panel", "PanelContainer", panel_style)
 	root.theme = theme
-	var top := _panel(root, Vector2(0, 0), Vector2(1, 0), Vector4(16, 16, -16, 140))
+	var top := _panel(root, Vector2(0, 0), Vector2(1, 0), Vector4(16, 16, -16, 168))
 	var header := VBoxContainer.new()
 	top.add_child(header)
 	var title := _label("SELENE FRONTIER  /  POLAR OUTPOST", 23)
@@ -43,6 +44,9 @@ func _ready() -> void:
 	header.add_child(stats)
 	utilities = _label("")
 	header.add_child(utilities)
+	logistics = _label("", 16)
+	logistics.add_theme_color_override("font_color", Color(0.86, 0.78, 0.52))
+	header.add_child(logistics)
 	var controls := HBoxContainer.new()
 	header.add_child(controls)
 	pause_button = _button("Pause [Space]", func(): pause_requested.emit())
@@ -58,7 +62,7 @@ func _ready() -> void:
 	controls.add_child(spacer)
 	for command in ["Left", "Right", "Up", "Down", "Orbit -", "Orbit +", "Zoom +", "Zoom -"]:
 		controls.add_child(_button(command, func(): camera_requested.emit(command)))
-	var right := _panel(root, Vector2(1, 0), Vector2(1, 1), Vector4(-310, 152, -16, -110))
+	var right := _panel(root, Vector2(1, 0), Vector2(1, 1), Vector4(-310, 212, -16, -110))
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	right.add_child(scroll)
@@ -94,7 +98,7 @@ func _ready() -> void:
 	inspector = _label("Click a module to inspect its local utility network.")
 	inspector.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tools.add_child(inspector)
-	var left := _panel(root, Vector2(0, 0), Vector2(0, 0), Vector4(16, 152, 315, 280))
+	var left := _panel(root, Vector2(0, 0), Vector2(0, 0), Vector4(16, 212, 315, 340))
 	var mission := VBoxContainer.new()
 	left.add_child(mission)
 	mission.add_child(_label("FOUNDING CHARTER", 20))
@@ -152,15 +156,17 @@ func set_tool(kind: String) -> void:
 
 func update_state(simulation: ColonySimulation, paused: bool, speed: int,
 		selected: Vector2i) -> void:
-	stats.text = "Day %d  /  %s   |   Credits %.0f   |   Crew %d/%d safe   |   Morale %.0f%%" % [
+	stats.text = "Day %d  /  %s   |   Credits %.0f   |   Supplies %.0f %s   |   Crew %d/%d safe   |   Morale %.0f%%" % [
 		simulation.day, "NIGHT" if simulation.is_night() else "SUNLIGHT",
-		simulation.credits, simulation.safe_crew, simulation.crew, simulation.morale
+		simulation.credits, simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_UNIT,
+		simulation.safe_crew, simulation.crew, simulation.morale
 	]
 	var parts: PackedStringArray = []
 	for utility in ["power", "water", "oxygen", "heat"]:
 		var total := simulation.totals(utility)
 		parts.append("%s %.0f/%.0f" % [utility.capitalize(), total.x, total.y])
 	utilities.text = "Supply / demand: " + "   |   ".join(parts) + "   (local networks matter)"
+	update_delivery_status(simulation, selected)
 	objective.text = "Science %.0f/30   Exports %.0f/40\nDay %d/30   Morale >=65%%\n%s" % [
 		simulation.science, simulation.exports, simulation.day,
 		"CHARTER COMPLETE" if simulation.charter_complete else "Keep all crew supplied."
@@ -177,6 +183,40 @@ func update_state(simulation: ColonySimulation, paused: bool, speed: int,
 				simulation.credits < float(BuildingCatalog.definition(kind)["cost"])
 			)
 	inspect(simulation, selected)
+
+
+func update_delivery_status(simulation: ColonySimulation, selected: Vector2i) -> void:
+	var summary := simulation.next_delivery_summary()
+	var active_pads: int = summary["active_pads"]
+	if active_pads > 0:
+		logistics.text = "Supply pads: %d active (+%.0f %s / %.0fd each)   |   Next landing: %.1fd (%s)" % [
+			active_pads,
+			ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
+			ColonySimulation.SUPPLY_DELIVERY_UNIT,
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL,
+			float(summary["next_time"]),
+			ColonySimulation.phase_label(str(summary["next_phase"]))
+		]
+	else:
+		logistics.text = "Supply pads: 0 active  (Build a Landing pad for +%.0f %s every %.0fd)" % [
+			ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
+			ColonySimulation.SUPPLY_DELIVERY_UNIT,
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL
+		]
+	if simulation.buildings.has(selected) and simulation.buildings[selected]["kind"] == "landing_pad":
+		inspect(simulation, selected)
+
+
+func _status_text(building: Dictionary) -> String:
+	var build_p := float(building.get("build_progress", 1.0))
+	if build_p < 1.0:
+		return "UNDER CONSTRUCTION (%.0f%%)" % (build_p * 100.0)
+	var cond := str(building.get("condition", ColonySimulation.CONDITION_OPERATIONAL))
+	if cond == ColonySimulation.CONDITION_DAMAGED:
+		return "DAMAGED (FAULT)"
+	if cond == ColonySimulation.CONDITION_REPAIRING:
+		return "UNDER REPAIR (%.0f%%)" % (float(building.get("repair_progress", 0.0)) * 100.0)
+	return "ONLINE" if building["active"] else "OFFLINE"
 
 
 func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
@@ -200,9 +240,24 @@ func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 	var network: Dictionary = simulation.networks[building["network"]]
 	var lines: PackedStringArray = [
 		"%s #%d" % [data["name"], building["id"]],
-		"Tile %d, %d  /  %s" % [cell.x, cell.y, "ONLINE" if building["active"] else "OFFLINE"],
-		str(data["description"]), "", "Local supply / demand:"
+		"Tile %d, %d  /  %s" % [cell.x, cell.y, _status_text(building)],
+		str(data["description"]),
 	]
+	if building["kind"] == "landing_pad":
+		var delivery := simulation.delivery_for_cell(cell)
+		if not delivery.is_empty():
+			var next_t := simulation.time_to_next_delivery(int(building["id"]))
+			lines.append("Lander: %s  /  Next +%.0f %s in %.1fd" % [
+				ColonySimulation.phase_label(str(delivery["phase"])),
+				ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
+				ColonySimulation.SUPPLY_DELIVERY_UNIT,
+				next_t
+			])
+			lines.append("Colony supplies: %.0f %s" % [
+				simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_UNIT
+			])
+	lines.append("")
+	lines.append("Local supply / demand:")
 	for utility in ["power", "water", "oxygen", "heat"]:
 		lines.append("%s: %.0f / %.0f" % [
 			utility.capitalize(), network["supply"][utility], network["demand"][utility]

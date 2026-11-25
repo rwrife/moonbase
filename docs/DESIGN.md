@@ -50,11 +50,11 @@ punishment. A failed connection should identify the upstream cause.
 | Crew | Roles, shifts, health, morale, workload, recreation, rescue | Habitat crew count and aggregate morale |
 | Economy | Imports, export contracts, market signals, upkeep, board commitments | Credits, upkeep, automatic refinery exports and periodic grants |
 | Research | Branching technologies, science requirements, field trials | Science accumulation and founding objective only |
-| Logistics | Landing windows, payload mass, depots, rovers, routes, stockpiles | Deferred |
+| Logistics | Landing windows, payload mass, depots, rovers, routes, stockpiles | Starter landing pad, constructible extra pads, recurring +4 t supply landings every 6 days per pad |
 | Terrain | Polar ice, sunlit ridges, lava tubes, minerals, survey uncertainty | Deformable heightfield, bulldozer grading, immovable landmarks, ice strip |
-| Hazards | Solar flares, impacts, dust, failures, warning and repair | Predictable artificial night cycle only |
+| Hazards | Solar flares, impacts, dust, failures, warning and repair | Predictable artificial night cycle; shared damage/repair visual states ready for #10 |
 | Modes | Tutorial campaign, authored scenarios, configurable sandbox | One founding scenario with continued play |
-| Presentation | Production assets, audio, animation, accessible overlays | Original procedural placeholder geometry and HUD |
+| Presentation | Production assets, audio, animation, accessible overlays | Original procedural placeholder geometry, lander visits, shared structure states, and HUD |
 
 Utility quantities and building costs below are fictional balance values, not
 NASA engineering predictions or verified original-game numbers. The
@@ -64,8 +64,9 @@ approved the previously blocked project-file writes and engine execution.
 
 ## First playable: founding charter
 
-Start with a small supplied outpost and a construction grant. Add reliable
-night-time generation, science, and exports while maintaining safe habitats.
+Start with a small supplied outpost, a starter landing pad with an approaching
+supply lander, and a construction grant. Add reliable night-time generation,
+science, and exports while maintaining safe habitats.
 The completion condition is day 30 or later, at least 30 science, at least
 40 export units, all crew supplied, and morale of at least 65.
 
@@ -92,6 +93,29 @@ drive out of a home garage and leave permanent tracks are planned in #16.
 | Life support | 220 | 2 | Uses 3 power and 2 water; produces 12 oxygen and 4 heat |
 | Science lab | 300 | 3 | Uses 4 power; 1 science/day with safe crew |
 | Regolith refinery | 280 | 3 | Uses 5 power; 2 export units/day at 12 credits/unit |
+| Landing pad | 240 | 0 | Self-powered beacon; receives +4 t supplies every 6 days per operational pad |
+
+### Supplies and recurring landings
+
+- **Supplies (`t`)** represent the colony's stockpile of Earth-delivered spares,
+  consumables, and general cargo reserves. Supplies are tracked separately from
+  **Credits** and piped local **Utilities** (power, water, oxygen, heat), and
+  form the logistics stockpile that later repair consumables (#10), cargo depots
+  (#22), and contract/import logistics (#8) will consume and extend.
+- **Starter pad:** every new game and restart includes one operational landing
+  pad on a graded, unblocked site near the starter outpost (`0, -2`) with its
+  first SELENE cargo lander already on approach (first `+4 t` delivery completes
+  in `2.2` days, then repeats every `6.0` days).
+- **Scaling with extra pads:** every operational landing pad runs an independent
+  `6.0`-day delivery schedule yielding `+4 t` once its lander visibly touches
+  down and finishes offloading. Building additional landing pads increases total
+  supply throughput linearly (`N` operational pads deliver `4 × N t` per 6 days)
+  rather than splitting a fixed colony-wide allocation.
+- **Lifecycle safety:** supplies are credited strictly once per completed
+  offload—never early, never on animation frames, and never while paused.
+  Demolishing or damaging a pad before offload completes cancels that visit
+  without crediting cargo; demolishing during departure preserves the already-credited
+  shipment without future or duplicate deliveries.
 
 All consumers in an overloaded component shut down together. This is a
 transparent prototype rule, not the final load-priority model. Production

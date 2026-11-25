@@ -11,14 +11,36 @@ const NEIGHBORS: Array[Vector2i] = [
 const STARTING_CREDITS := 1800.0
 const BULLDOZE_COST := 15.0
 
+const CONDITION_OPERATIONAL := "operational"
+const CONDITION_DAMAGED := "damaged"
+const CONDITION_REPAIRING := "repairing"
+const VALID_CONDITIONS: Array[String] = [
+	CONDITION_OPERATIONAL, CONDITION_DAMAGED, CONDITION_REPAIRING
+]
+
+const STARTER_LANDING_PAD_CELL := Vector2i(0, -2)
+const SUPPLY_DELIVERY_AMOUNT := 4.0
+const SUPPLY_DELIVERY_UNIT := "t"
+const SUPPLY_DELIVERY_INTERVAL := 6.0
+const DELIVERY_PHASE_APPROACH := 3.0
+const DELIVERY_PHASE_DESCEND := 4.2
+const DELIVERY_PHASE_DELIVER := 5.0
+const DELIVERY_CREDIT_TIME := 5.4
+const STARTER_INITIAL_CYCLE_TIME := 3.2
+
 var buildings: Dictionary = {}
 ## Cells flattened into construction pads (insertion order is grading order).
 var graded: Dictionary = {}
 ## Cells covered by immovable landmark craters or boulders -> "crater" / "boulder".
 var blocked: Dictionary = SiteSurvey.blocked_cells(MAP_RADIUS)
 var networks: Array[Dictionary] = []
+## Independent delivery schedules keyed by landing pad building id.
+var deliveries: Dictionary = {}
 var credits := STARTING_CREDITS
+var supplies := 0.0
+var deliveries_completed := 0
 var day := 1
+var day_accumulator := 0.0
 var morale := 85.0
 var science := 0.0
 var exports := 0.0
@@ -36,8 +58,12 @@ func _init() -> void:
 func reset() -> void:
 	buildings.clear()
 	graded.clear()
+	deliveries.clear()
 	credits = STARTING_CREDITS
+	supplies = 0.0
+	deliveries_completed = 0
 	day = 1
+	day_accumulator = 0.0
 	morale = 85.0
 	science = 0.0
 	exports = 0.0
@@ -47,15 +73,94 @@ func reset() -> void:
 	_add(Vector2i(-2, 0), "oxygen")
 	_add(Vector2i(-1, 0), "habitat")
 	_add(Vector2i(0, 0), "solar")
-	last_report = "Founding grant received. Build reliable power before night."
+	var pad_id := _add(STARTER_LANDING_PAD_CELL, "landing_pad")
+	if deliveries.has(pad_id):
+		deliveries[pad_id]["cycle_time"] = STARTER_INITIAL_CYCLE_TIME
+		_refresh_delivery_phase(deliveries[pad_id])
+	last_report = "Founding grant received. Supply lander approaching; build reliable power before night."
 	recalculate()
 	changed.emit()
 
 
-func _add(cell: Vector2i, kind: String) -> void:
-	buildings[cell] = {"id": next_id, "kind": kind, "active": false, "network": -1}
+func _add(cell: Vector2i, kind: String) -> int:
+	var id := next_id
+	buildings[cell] = {
+		"id": id,
+		"kind": kind,
+		"active": false,
+		"network": -1,
+		"build_progress": 1.0,
+		"condition": CONDITION_OPERATIONAL,
+		"repair_progress": 1.0,
+	}
 	graded[cell] = true
 	next_id += 1
+	if kind == "landing_pad":
+		var entry := {
+			"building_id": id,
+			"cell": cell,
+			"cycle_time": 0.0,
+			"phase": "waiting",
+			"phase_progress": 0.0,
+			"visit_id": 1,
+			"cargo_credited": false,
+		}
+		_refresh_delivery_phase(entry)
+		deliveries[id] = entry
+	return id
+
+
+func is_building_operational(building: Dictionary) -> bool:
+	return (
+		float(building.get("build_progress", 1.0)) >= 1.0
+		and str(building.get("condition", CONDITION_OPERATIONAL)) == CONDITION_OPERATIONAL
+	)
+
+
+func set_building_build_progress(cell: Vector2i, progress: float) -> bool:
+	if not buildings.has(cell):
+		return false
+	buildings[cell]["build_progress"] = clampf(progress, 0.0, 1.0)
+	_sync_delivery_for_pad_state(cell)
+	recalculate()
+	changed.emit()
+	return true
+
+
+func set_building_condition(cell: Vector2i, condition: String,
+		repair_progress: float = -1.0) -> bool:
+	if not buildings.has(cell) or not (condition in VALID_CONDITIONS):
+		return false
+	var building: Dictionary = buildings[cell]
+	building["condition"] = condition
+	if condition == CONDITION_OPERATIONAL:
+		building["repair_progress"] = 1.0
+	elif condition == CONDITION_DAMAGED:
+		building["repair_progress"] = 0.0
+	elif repair_progress >= 0.0:
+		building["repair_progress"] = clampf(repair_progress, 0.0, 1.0)
+	else:
+		building["repair_progress"] = clampf(float(building.get("repair_progress", 0.0)), 0.0, 1.0)
+	_sync_delivery_for_pad_state(cell)
+	recalculate()
+	changed.emit()
+	return true
+
+
+func _sync_delivery_for_pad_state(cell: Vector2i) -> void:
+	if not buildings.has(cell):
+		return
+	var building: Dictionary = buildings[cell]
+	if building["kind"] != "landing_pad":
+		return
+	var id: int = building["id"]
+	if not deliveries.has(id):
+		return
+	if not is_building_operational(building):
+		var entry: Dictionary = deliveries[id]
+		if not entry["cargo_credited"] and float(entry["cycle_time"]) >= DELIVERY_PHASE_APPROACH:
+			entry["cycle_time"] = 0.0
+			_refresh_delivery_phase(entry)
 
 
 func is_night() -> bool:
@@ -128,9 +233,12 @@ func demolish(cell: Vector2i) -> bool:
 	if not buildings.has(cell):
 		report("Select an occupied tile to demolish.")
 		return false
-	var kind: String = buildings[cell]["kind"]
+	var building: Dictionary = buildings[cell]
+	var kind: String = building["kind"]
+	var id: int = building["id"]
 	credits += float(BuildingCatalog.definition(kind)["cost"]) * 0.25
 	buildings.erase(cell)
+	deliveries.erase(id)
 	recalculate()
 	report("Module dismantled; 25% of construction cost recovered.")
 	changed.emit()
@@ -174,7 +282,10 @@ func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
 	var supply := {"power": 0.0, "water": 0.0, "oxygen": 0.0, "heat": 0.0}
 	var demand := {"power": 0.0, "water": 0.0, "oxygen": 0.0, "heat": 0.0}
 	for cell in cells:
-		var kind: String = buildings[cell]["kind"]
+		var building: Dictionary = buildings[cell]
+		if not is_building_operational(building):
+			continue
+		var kind: String = building["kind"]
 		var data := BuildingCatalog.definition(kind)
 		if kind != "solar" or not is_night():
 			supply["power"] += float(data.get("power", 0))
@@ -185,11 +296,17 @@ func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
 	var powered: bool = supply["power"] >= demand["power"]
 	# Evaluate dependencies from totals, never by consumer insertion order.
 	for cell in cells:
-		if buildings[cell]["kind"] == "ice" and powered:
+		var building: Dictionary = buildings[cell]
+		if not is_building_operational(building):
+			continue
+		if building["kind"] == "ice" and powered:
 			supply["water"] += float(BuildingCatalog.definition("ice")["water"])
 	var watered: bool = supply["water"] >= demand["water"]
 	for cell in cells:
-		var kind: String = buildings[cell]["kind"]
+		var building: Dictionary = buildings[cell]
+		if not is_building_operational(building):
+			continue
+		var kind: String = building["kind"]
 		var data := BuildingCatalog.definition(kind)
 		if kind == "reactor" or (kind == "oxygen" and powered and watered):
 			supply["heat"] += float(data.get("heat", 0))
@@ -200,10 +317,14 @@ func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
 		and supply["heat"] >= demand["heat"]
 	)
 	for cell in cells:
-		var kind: String = buildings[cell]["kind"]
+		var building: Dictionary = buildings[cell]
+		if not is_building_operational(building):
+			building["active"] = false
+			continue
+		var kind: String = building["kind"]
 		var active := powered
 		match kind:
-			"link", "reactor":
+			"link", "reactor", "landing_pad":
 				active = true
 			"solar":
 				active = not is_night()
@@ -213,7 +334,7 @@ func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
 				active = supported
 				if active:
 					safe_crew += 8
-		buildings[cell]["active"] = active
+		building["active"] = active
 	var shortages: Array[String] = []
 	for utility: String in demand:
 		if supply[utility] < demand[utility]:
@@ -224,7 +345,178 @@ func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
 	}
 
 
+func advance(elapsed_days: float) -> void:
+	if elapsed_days <= 0.0:
+		return
+	var delivery_changed := advance_deliveries(elapsed_days)
+	day_accumulator += elapsed_days
+	var ticked := false
+	while day_accumulator >= 1.0 - 0.000001:
+		day_accumulator = maxf(0.0, day_accumulator - 1.0)
+		_tick_day()
+		ticked = true
+	if delivery_changed and not ticked:
+		changed.emit()
+
+
+func advance_deliveries(elapsed_days: float) -> bool:
+	if elapsed_days <= 0.0:
+		return false
+	var credited_any := false
+	var ids: Array = deliveries.keys()
+	ids.sort()
+	for id: int in ids:
+		var entry: Dictionary = deliveries[id]
+		var cell: Vector2i = entry["cell"]
+		if not buildings.has(cell):
+			deliveries.erase(id)
+			continue
+		var building: Dictionary = buildings[cell]
+		var operational := is_building_operational(building) and bool(building["active"])
+		var remaining := elapsed_days
+		while remaining > 0.000001:
+			var cycle_time: float = float(entry["cycle_time"])
+			var credited: bool = bool(entry["cargo_credited"])
+			if not operational:
+				if credited:
+					var to_depart := SUPPLY_DELIVERY_INTERVAL - cycle_time
+					if remaining >= to_depart - 0.000001:
+						entry["cycle_time"] = 0.0
+						entry["cargo_credited"] = false
+						entry["visit_id"] = int(entry["visit_id"]) + 1
+						remaining = 0.0
+					else:
+						entry["cycle_time"] = cycle_time + remaining
+						remaining = 0.0
+				else:
+					if cycle_time >= DELIVERY_PHASE_APPROACH:
+						entry["cycle_time"] = 0.0
+					remaining = 0.0
+				break
+			if not credited:
+				var to_credit := DELIVERY_CREDIT_TIME - cycle_time
+				if remaining >= to_credit - 0.000001:
+					remaining = maxf(0.0, remaining - maxf(0.0, to_credit))
+					entry["cycle_time"] = DELIVERY_CREDIT_TIME
+					entry["cargo_credited"] = true
+					supplies += SUPPLY_DELIVERY_AMOUNT
+					deliveries_completed += 1
+					credited_any = true
+					report("Supply lander delivered %.0f %s supplies to Landing pad #%d." % [
+						SUPPLY_DELIVERY_AMOUNT, SUPPLY_DELIVERY_UNIT, id
+					])
+				else:
+					entry["cycle_time"] = cycle_time + remaining
+					remaining = 0.0
+			else:
+				var to_reset := SUPPLY_DELIVERY_INTERVAL - cycle_time
+				if remaining >= to_reset - 0.000001:
+					remaining = maxf(0.0, remaining - maxf(0.0, to_reset))
+					entry["cycle_time"] = 0.0
+					entry["cargo_credited"] = false
+					entry["visit_id"] = int(entry["visit_id"]) + 1
+				else:
+					entry["cycle_time"] = cycle_time + remaining
+					remaining = 0.0
+		_refresh_delivery_phase(entry)
+	return credited_any
+
+
+func _refresh_delivery_phase(entry: Dictionary) -> void:
+	var t := clampf(float(entry["cycle_time"]), 0.0, SUPPLY_DELIVERY_INTERVAL)
+	entry["cycle_time"] = t
+	if t < DELIVERY_PHASE_APPROACH:
+		entry["phase"] = "waiting"
+		entry["phase_progress"] = t / DELIVERY_PHASE_APPROACH
+	elif t < DELIVERY_PHASE_DESCEND:
+		entry["phase"] = "approaching"
+		entry["phase_progress"] = (t - DELIVERY_PHASE_APPROACH) / (
+			DELIVERY_PHASE_DESCEND - DELIVERY_PHASE_APPROACH
+		)
+	elif t < DELIVERY_PHASE_DELIVER:
+		entry["phase"] = "descending"
+		entry["phase_progress"] = (t - DELIVERY_PHASE_DESCEND) / (
+			DELIVERY_PHASE_DELIVER - DELIVERY_PHASE_DESCEND
+		)
+	elif t < DELIVERY_CREDIT_TIME:
+		entry["phase"] = "delivering"
+		entry["phase_progress"] = (t - DELIVERY_PHASE_DELIVER) / (
+			DELIVERY_CREDIT_TIME - DELIVERY_PHASE_DELIVER
+		)
+	else:
+		entry["phase"] = "departing"
+		entry["phase_progress"] = (t - DELIVERY_CREDIT_TIME) / (
+			SUPPLY_DELIVERY_INTERVAL - DELIVERY_CREDIT_TIME
+		)
+
+
+func delivery_for_cell(cell: Vector2i) -> Dictionary:
+	if not buildings.has(cell):
+		return {}
+	var building: Dictionary = buildings[cell]
+	if building["kind"] != "landing_pad":
+		return {}
+	return deliveries.get(building["id"], {})
+
+
+func time_to_next_delivery(building_id: int) -> float:
+	if not deliveries.has(building_id):
+		return -1.0
+	var entry: Dictionary = deliveries[building_id]
+	var t := float(entry["cycle_time"])
+	if not bool(entry["cargo_credited"]):
+		return maxf(0.0, DELIVERY_CREDIT_TIME - t)
+	return maxf(0.0, (SUPPLY_DELIVERY_INTERVAL - t) + DELIVERY_CREDIT_TIME)
+
+
+func next_delivery_summary() -> Dictionary:
+	var active_pads := 0
+	var soonest := -1.0
+	var next_phase := ""
+	var next_cell := Vector2i(999, 999)
+	for id: int in deliveries:
+		var entry: Dictionary = deliveries[id]
+		var cell: Vector2i = entry["cell"]
+		if not buildings.has(cell):
+			continue
+		var building: Dictionary = buildings[cell]
+		if not is_building_operational(building) or not bool(building["active"]):
+			continue
+		active_pads += 1
+		var remaining := time_to_next_delivery(id)
+		if soonest < 0.0 or remaining < soonest:
+			soonest = remaining
+			next_phase = str(entry["phase"])
+			next_cell = cell
+	return {
+		"active_pads": active_pads,
+		"next_time": soonest,
+		"next_phase": next_phase,
+		"next_cell": next_cell,
+	}
+
+
+static func phase_label(phase: String) -> String:
+	match phase:
+		"waiting":
+			return "Standby"
+		"approaching":
+			return "Approaching"
+		"descending":
+			return "Descending"
+		"delivering":
+			return "Offloading"
+		"departing":
+			return "Departing"
+	return "Idle"
+
+
 func tick() -> void:
+	advance_deliveries(1.0)
+	_tick_day()
+
+
+func _tick_day() -> void:
 	day += 1
 	recalculate()
 	var upkeep := 0.0
@@ -268,3 +560,128 @@ func totals(utility: String) -> Vector2:
 		result.x += float(network["supply"][utility])
 		result.y += float(network["demand"][utility])
 	return result
+
+
+func export_state() -> Dictionary:
+	var graded_list: Array = []
+	for cell: Vector2i in graded:
+		graded_list.append([cell.x, cell.y])
+	var building_list: Array = []
+	for cell: Vector2i in buildings:
+		var b: Dictionary = buildings[cell]
+		building_list.append({
+			"cell": [cell.x, cell.y],
+			"id": int(b["id"]),
+			"kind": str(b["kind"]),
+			"build_progress": float(b.get("build_progress", 1.0)),
+			"condition": str(b.get("condition", CONDITION_OPERATIONAL)),
+			"repair_progress": float(b.get("repair_progress", 1.0)),
+		})
+	var delivery_list: Array = []
+	var ids: Array = deliveries.keys()
+	ids.sort()
+	for id: int in ids:
+		var d: Dictionary = deliveries[id]
+		var cell: Vector2i = d["cell"]
+		delivery_list.append({
+			"building_id": int(d["building_id"]),
+			"cell": [cell.x, cell.y],
+			"cycle_time": float(d["cycle_time"]),
+			"visit_id": int(d["visit_id"]),
+			"cargo_credited": bool(d["cargo_credited"]),
+		})
+	return {
+		"version": 1,
+		"day": day,
+		"day_accumulator": day_accumulator,
+		"credits": credits,
+		"supplies": supplies,
+		"deliveries_completed": deliveries_completed,
+		"morale": morale,
+		"science": science,
+		"exports": exports,
+		"charter_complete": charter_complete,
+		"last_report": last_report,
+		"next_id": next_id,
+		"graded": graded_list,
+		"buildings": building_list,
+		"deliveries": delivery_list,
+	}
+
+
+func import_state(state: Dictionary) -> bool:
+	if int(state.get("version", 0)) != 1:
+		return false
+	buildings.clear()
+	graded.clear()
+	deliveries.clear()
+	day = int(state.get("day", 1))
+	day_accumulator = clampf(float(state.get("day_accumulator", 0.0)), 0.0, 1.0)
+	credits = float(state.get("credits", STARTING_CREDITS))
+	supplies = float(state.get("supplies", 0.0))
+	deliveries_completed = int(state.get("deliveries_completed", 0))
+	morale = clampf(float(state.get("morale", 85.0)), 0.0, 100.0)
+	science = float(state.get("science", 0.0))
+	exports = float(state.get("exports", 0.0))
+	charter_complete = bool(state.get("charter_complete", false))
+	last_report = str(state.get("last_report", ""))
+	next_id = int(state.get("next_id", 1))
+	for raw_cell: Array in state.get("graded", []):
+		graded[Vector2i(int(raw_cell[0]), int(raw_cell[1]))] = true
+	for raw_b: Dictionary in state.get("buildings", []):
+		var raw_cell: Array = raw_b["cell"]
+		var cell := Vector2i(int(raw_cell[0]), int(raw_cell[1]))
+		var kind := str(raw_b["kind"])
+		if not BuildingCatalog.DATA.has(kind):
+			continue
+		var condition := str(raw_b.get("condition", CONDITION_OPERATIONAL))
+		if not (condition in VALID_CONDITIONS):
+			condition = CONDITION_OPERATIONAL
+		buildings[cell] = {
+			"id": int(raw_b["id"]),
+			"kind": kind,
+			"active": false,
+			"network": -1,
+			"build_progress": clampf(float(raw_b.get("build_progress", 1.0)), 0.0, 1.0),
+			"condition": condition,
+			"repair_progress": clampf(float(raw_b.get("repair_progress", 1.0)), 0.0, 1.0),
+		}
+		graded[cell] = true
+		next_id = maxi(next_id, int(raw_b["id"]) + 1)
+	for raw_d: Dictionary in state.get("deliveries", []):
+		var raw_cell: Array = raw_d["cell"]
+		var cell := Vector2i(int(raw_cell[0]), int(raw_cell[1]))
+		var id := int(raw_d["building_id"])
+		if not buildings.has(cell) or int(buildings[cell]["id"]) != id:
+			continue
+		if buildings[cell]["kind"] != "landing_pad":
+			continue
+		var entry := {
+			"building_id": id,
+			"cell": cell,
+			"cycle_time": clampf(float(raw_d.get("cycle_time", 0.0)), 0.0, SUPPLY_DELIVERY_INTERVAL),
+			"phase": "waiting",
+			"phase_progress": 0.0,
+			"visit_id": int(raw_d.get("visit_id", 1)),
+			"cargo_credited": bool(raw_d.get("cargo_credited", false)),
+		}
+		_refresh_delivery_phase(entry)
+		deliveries[id] = entry
+	# Ensure every restored landing pad has a delivery schedule.
+	for cell: Vector2i in buildings:
+		var b: Dictionary = buildings[cell]
+		if b["kind"] == "landing_pad" and not deliveries.has(b["id"]):
+			var entry := {
+				"building_id": int(b["id"]),
+				"cell": cell,
+				"cycle_time": 0.0,
+				"phase": "waiting",
+				"phase_progress": 0.0,
+				"visit_id": 1,
+				"cargo_credited": false,
+			}
+			_refresh_delivery_phase(entry)
+			deliveries[int(b["id"])] = entry
+	recalculate()
+	changed.emit()
+	return true
