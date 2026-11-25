@@ -63,7 +63,9 @@ Do not promise desktop feature parity or equal performance.
 
 ## Proposed qualification targets
 
-These are acceptance targets, not measured results:
+Performance profiling and tuning are deferred at the owner's request. These are
+future qualification targets, not measured results or gates for the current
+prototype and gameplay development:
 
 - Desktop: 60 FPS at 1080p on a declared midrange reference machine.
 - Web: 30 FPS at 720p on a declared integrated-GPU reference machine.

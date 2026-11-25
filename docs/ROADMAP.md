@@ -14,6 +14,10 @@ Chromium founding-charter playthrough have passed; reference-hardware performanc
 Firefox and complete browser lifecycle qualification remain open in the
 validation issue.
 
+Performance tuning is intentionally deferred at the owner's request. Prioritize
+playable systems and correctness now; the proposed FPS budgets are future
+qualification goals, not blockers for the next gameplay work.
+
 GitHub issues are the actionable backlog; this document records sequencing and
 release gates. The issue index below links every published development task.
 
