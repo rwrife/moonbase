@@ -2,7 +2,7 @@ class_name BuildingCatalog
 extends RefCounted
 
 const ORDER: Array[String] = [
-	"link", "habitat", "solar", "reactor", "ice", "oxygen", "lab", "mine"
+	"link", "habitat", "solar", "reactor", "ice", "oxygen", "lab", "mine", "landing_pad"
 ]
 
 const DATA: Dictionary = {
@@ -47,6 +47,11 @@ const DATA: Dictionary = {
 		"name": "Regolith refinery", "cost": 280, "upkeep": 3, "power_use": 5,
 		"color": Color(0.72, 0.61, 0.44),
 		"description": "2 exports/day at 12 credits each, with power and safe crew."
+	},
+	"landing_pad": {
+		"name": "Landing pad", "cost": 240, "upkeep": 0,
+		"color": Color(0.86, 0.68, 0.28),
+		"description": "Receives +4 t supplies every 6 days per operational pad. Self-powered beacon."
 	}
 }
 

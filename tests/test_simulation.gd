@@ -11,8 +11,10 @@ func _init() -> void:
 	test_no_crew_production()
 	test_determinism()
 	test_grading_and_landmarks()
+	test_landing_pad_deliveries()
+	test_structure_states_and_serialization()
 	if failures == 0:
-		print("PASS: placement, topology, cascades, economy, charter, determinism and grading")
+		print("PASS: placement, topology, cascades, economy, charter, determinism, grading, deliveries and states")
 	quit(1 if failures else 0)
 
 
@@ -49,16 +51,17 @@ func test_placement() -> void:
 
 func test_connections() -> void:
 	var sim := ColonySimulation.new()
+	var base_networks := sim.networks.size()
 	check(sim.safe_crew == 8, "Starter outpost must be supplied")
 	check(sim.place("habitat", Vector2i(2, 0)), "Place isolated habitat")
-	check(sim.networks.size() == 2, "Separated cells must form distinct components")
+	check(sim.networks.size() == base_networks + 1, "Separated cells must form distinct components")
 	check(not sim.buildings[Vector2i(2, 0)]["active"], "Remote supply must not serve isolated habitat")
 	check(sim.place("link", Vector2i(1, 0)), "Bridge isolated habitat")
-	check(sim.networks.size() == 1 and sim.safe_crew == 16, "Link must merge networks and restore service")
+	check(sim.networks.size() == base_networks and sim.safe_crew == 16, "Link must merge networks and restore service")
 	check(sim.demolish(Vector2i(1, 0)), "Remove bridge")
-	check(sim.networks.size() == 2 and sim.safe_crew == 8, "Removing bridge must split networks")
+	check(sim.networks.size() == base_networks + 1 and sim.safe_crew == 8, "Removing bridge must split networks")
 	check(sim.place("solar", Vector2i(3, 1)), "Place diagonal generator")
-	check(sim.networks.size() == 3, "Diagonal neighbors must not connect")
+	check(sim.networks.size() == base_networks + 2, "Diagonal neighbors must not connect")
 	var local: Dictionary = sim.networks[sim.buildings[Vector2i(2, 0)]["network"]]
 	check(local["supply"]["power"] == 0, "Isolated component cannot borrow global surplus")
 	check("Power" in local["shortages"], "Inspection must identify local shortage")
@@ -116,8 +119,10 @@ func test_economy_and_charter() -> void:
 	threshold.tick()
 	check(threshold.charter_complete, "Exact morale threshold must permit charter")
 	sim.reset()
-	check(sim.day == 1 and sim.science == 0 and sim.exports == 0, "Restart must clear progress")
-	check(not sim.charter_complete and sim.buildings.size() == 4, "Restart must restore starter colony")
+	check(sim.day == 1 and sim.science == 0 and sim.exports == 0 and sim.supplies == 0.0,
+		"Restart must clear progress and supplies")
+	check(not sim.charter_complete and sim.buildings.size() == 5,
+		"Restart must restore starter colony including starter landing pad")
 
 
 func test_no_crew_production() -> void:
@@ -140,12 +145,18 @@ func test_determinism() -> void:
 	check(a.buildings == b.buildings and a.networks == b.networks, "Repeated commands must produce identical networks")
 	check(a.credits == b.credits and a.science == b.science and a.morale == b.morale,
 		"Repeated ticks must produce identical economy and morale")
+	check(a.supplies == b.supplies and a.deliveries == b.deliveries,
+		"Repeated ticks must produce identical supply deliveries")
 
 
 func test_grading_and_landmarks() -> void:
 	var sim := ColonySimulation.new()
-	for cell in [Vector2i(-3, 0), Vector2i(-2, 0), Vector2i(-1, 0), Vector2i(0, 0)]:
-		check(sim.graded.has(cell), "Starter outpost must sit on graded pads")
+	for cell in [
+		Vector2i(-3, 0), Vector2i(-2, 0), Vector2i(-1, 0), Vector2i(0, 0),
+		ColonySimulation.STARTER_LANDING_PAD_CELL
+	]:
+		check(sim.graded.has(cell), "Starter outpost and landing pad must sit on graded pads")
+		check(not sim.blocked.has(cell), "Starter outpost and landing pad must not be blocked")
 	check(not sim.blocked.is_empty(), "Survey must contain immovable landmarks")
 	for cell in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(7, 7), Vector2i(-4, 0)]:
 		check(not sim.blocked.has(cell), "Landmarks must not cover core starter/test cells")
@@ -163,4 +174,145 @@ func test_grading_and_landmarks() -> void:
 	sim.demolish(Vector2i(6, 5))
 	check(sim.graded.has(Vector2i(6, 5)), "Demolition must leave the graded scar")
 	sim.reset()
-	check(not sim.graded.has(Vector2i(5, 5)) and sim.graded.size() == 4, "Reset must restore untouched regolith")
+	check(not sim.graded.has(Vector2i(5, 5)) and sim.graded.size() == 5,
+		"Reset must restore untouched regolith and starter pads")
+
+
+func test_landing_pad_deliveries() -> void:
+	var sim := ColonySimulation.new()
+	var pad_cell := ColonySimulation.STARTER_LANDING_PAD_CELL
+	check(sim.buildings.has(pad_cell) and sim.buildings[pad_cell]["kind"] == "landing_pad",
+		"New game must start with a default landing pad")
+	check(sim.buildings[pad_cell]["active"], "Starter landing pad must be operational")
+	var starter_delivery := sim.delivery_for_cell(pad_cell)
+	check(not starter_delivery.is_empty() and starter_delivery["phase"] == "approaching",
+		"Starter landing pad must begin with a visible approaching supply ship")
+	check(sim.supplies == 0.0 and not starter_delivery["cargo_credited"],
+		"Supply credit must not be applied before landing completes")
+	var expected_first := ColonySimulation.DELIVERY_CREDIT_TIME - ColonySimulation.STARTER_INITIAL_CYCLE_TIME
+	check(is_equal_approx(sim.time_to_next_delivery(int(starter_delivery["building_id"])), expected_first),
+		"Starter landing pad must have a predictable first-delivery schedule")
+
+	# Advance into descending and delivering, stopping just before credit completes.
+	sim.advance(expected_first - 0.1)
+	check(sim.delivery_for_cell(pad_cell)["phase"] == "delivering",
+		"Ship must reach delivering phase before cargo is credited")
+	check(sim.supplies == 0.0, "No supply may be credited before delivery finishes")
+
+	# Finish delivery; credit must apply once, then remain unchanged through departure.
+	sim.advance(0.15)
+	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Completed landing must credit one supply shipment")
+	check(sim.deliveries_completed == 1 and sim.delivery_for_cell(pad_cell)["phase"] == "departing",
+		"Lander must enter departing phase after crediting cargo")
+	sim.advance(0.2)
+	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Departure frames must never double-credit supplies")
+
+	# Fixed interval: advance exactly two full intervals (12 days) -> +2 deliveries.
+	sim.advance(ColonySimulation.SUPPLY_DELIVERY_INTERVAL * 2.0)
+	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT * 3.0),
+		"Repeated deliveries must occur at the fixed interval")
+
+	# Two operational pads yield twice the supplies of one over equivalent intervals.
+	var one_pad := ColonySimulation.new()
+	var two_pads := ColonySimulation.new()
+	check(two_pads.place("landing_pad", Vector2i(3, -2)), "Player must be able to build additional landing pads")
+	var span := ColonySimulation.SUPPLY_DELIVERY_INTERVAL * 3.0
+	one_pad.advance(span)
+	two_pads.advance(span)
+	check(is_equal_approx(two_pads.supplies, one_pad.supplies * 2.0),
+		"Two operational pads must yield twice the supplies of one over equivalent intervals")
+
+	# Demolishing a pad before delivery completes cancels delivery with zero credit.
+	var abort_sim := ColonySimulation.new()
+	abort_sim.advance(expected_first - 0.2)
+	check(abort_sim.supplies == 0.0, "Supply must still be zero before offload finishes")
+	check(abort_sim.demolish(pad_cell), "Demolishing pad during descent must succeed")
+	check(abort_sim.deliveries.is_empty(), "Demolishing pad must remove its delivery schedule")
+	abort_sim.advance(10.0)
+	check(abort_sim.supplies == 0.0, "Removed pad must not leave stranded deliveries")
+
+	# Demolishing a pad after credit during departure preserves credited supplies without duplication.
+	var post_sim := ColonySimulation.new()
+	post_sim.advance(expected_first + 0.05)
+	check(is_equal_approx(post_sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Credited supply must exist during departure")
+	post_sim.demolish(pad_cell)
+	post_sim.advance(12.0)
+	check(is_equal_approx(post_sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Demolishing pad during departure must preserve credited cargo without further deliveries")
+
+	# Restart restores starter pad and initial schedule.
+	two_pads.reset()
+	check(two_pads.supplies == 0.0 and two_pads.deliveries.size() == 1,
+		"Restart must reset supplies and restore single starter delivery")
+	check(two_pads.delivery_for_cell(pad_cell)["phase"] == "approaching",
+		"Restart must restore starter approaching supply ship")
+
+
+func test_structure_states_and_serialization() -> void:
+	var sim := ColonySimulation.new()
+	var solar_cell := Vector2i(0, 0)
+	var pad_cell := ColonySimulation.STARTER_LANDING_PAD_CELL
+
+	# Under construction takes structure offline and removes its utility output.
+	check(sim.set_building_build_progress(solar_cell, 0.5), "Should set partial build progress")
+	check(not sim.buildings[solar_cell]["active"] and sim.safe_crew == 0,
+		"Under-construction generator must not supply power")
+	check(sim.set_building_build_progress(solar_cell, 1.0), "Completing construction must succeed")
+	check(sim.buildings[solar_cell]["active"] and sim.safe_crew == 8,
+		"Completed generator must restore colony power")
+
+	# Damaged and repairing states take structure offline; operational restores it.
+	check(sim.set_building_condition(solar_cell, ColonySimulation.CONDITION_DAMAGED),
+		"Should mark structure damaged")
+	check(not sim.buildings[solar_cell]["active"] and sim.safe_crew == 0,
+		"Damaged generator must go offline")
+	check(sim.set_building_condition(solar_cell, ColonySimulation.CONDITION_REPAIRING, 0.6),
+		"Should mark structure repairing")
+	check(not sim.buildings[solar_cell]["active"], "Repairing structure must stay offline until restored")
+	check(sim.set_building_condition(solar_cell, ColonySimulation.CONDITION_OPERATIONAL),
+		"Repaired structure must return to operational")
+	check(sim.buildings[solar_cell]["active"] and sim.safe_crew == 8,
+		"Restored structure must resume service")
+
+	# Damaged landing pad aborts unlanded approach without crediting supplies.
+	sim.set_building_condition(pad_cell, ColonySimulation.CONDITION_DAMAGED)
+	check(sim.delivery_for_cell(pad_cell)["phase"] == "waiting",
+		"Damaged landing pad must abort unlanded approach")
+	sim.advance(8.0)
+	check(sim.supplies == 0.0, "Damaged landing pad must not credit deliveries")
+
+	# Save/load round-trip preserves structure states and mid-visit delivery state without duplication.
+	var save_src := ColonySimulation.new()
+	save_src.set_building_build_progress(Vector2i(-3, 0), 0.5)
+	save_src.set_building_condition(Vector2i(-2, 0), ColonySimulation.CONDITION_DAMAGED)
+	save_src.set_building_condition(Vector2i(-1, 0), ColonySimulation.CONDITION_REPAIRING, 0.4)
+	var first_t := ColonySimulation.DELIVERY_CREDIT_TIME - ColonySimulation.STARTER_INITIAL_CYCLE_TIME
+	# Snapshot mid-descent (before credit).
+	save_src.advance(first_t - 0.5)
+	var snap_before := save_src.export_state()
+	var restored_before := ColonySimulation.new()
+	check(restored_before.import_state(snap_before), "Import state must succeed")
+	check(is_equal_approx(restored_before.buildings[Vector2i(-3, 0)]["build_progress"], 0.5),
+		"Save/load must restore build_progress")
+	check(restored_before.buildings[Vector2i(-2, 0)]["condition"] == ColonySimulation.CONDITION_DAMAGED,
+		"Save/load must restore damaged condition")
+	check(restored_before.buildings[Vector2i(-1, 0)]["condition"] == ColonySimulation.CONDITION_REPAIRING
+		and is_equal_approx(restored_before.buildings[Vector2i(-1, 0)]["repair_progress"], 0.4),
+		"Save/load must restore repairing condition and progress")
+	restored_before.advance(0.6)
+	check(is_equal_approx(restored_before.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Restored in-flight descent must credit cargo once on completion")
+
+	# Snapshot mid-departure (after credit) must not double-credit on resume.
+	var snap_after := restored_before.export_state()
+	var restored_after := ColonySimulation.new()
+	check(restored_after.import_state(snap_after), "Import mid-departure state must succeed")
+	restored_after.advance(1.0)
+	check(is_equal_approx(restored_after.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Restored departing visit must not duplicate already-credited cargo")
+	restored_after.advance(ColonySimulation.SUPPLY_DELIVERY_INTERVAL)
+	check(is_equal_approx(restored_after.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT * 2.0),
+		"Restored departing visit must resume recurring deliveries on schedule")
