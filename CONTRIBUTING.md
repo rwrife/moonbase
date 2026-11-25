@@ -9,6 +9,8 @@ Use standard Godot 4.7.2, GDScript, and the Compatibility baseline. Keep simulat
 state independent of rendering; commands must validate before charging resources.
 Use InputMap actions, explicit types, and signals rather than UI-owned game rules.
 Update directly affected documents when changing gameplay.
+New or changed structures must follow the
+[structure style guide](docs/STRUCTURE_STYLE_GUIDE.md).
 
 On a fresh checkout, run these commands before submitting changes:
 
