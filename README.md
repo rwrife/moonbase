@@ -86,6 +86,7 @@ Build outputs are ignored and excluded from Godot's resource scan.
 - [Technical architecture](docs/ARCHITECTURE.md)
 - [Phased roadmap and developer issues](docs/ROADMAP.md)
 - [Art direction and platform limits](docs/ART_AND_PLATFORMS.md)
+- [Structure style guide](docs/STRUCTURE_STYLE_GUIDE.md)
 - [Historical sources and uncertainty](docs/SOURCES.md)
 - [Contribution guidance](CONTRIBUTING.md)
 

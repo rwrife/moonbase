@@ -31,6 +31,7 @@ No wind-driven motion, smoke, or exposed glowing reactor cores are used in vacuu
 These remain procedural prototypes, not photoreal production assets or validated
 engineering designs. `LunarModule` owns the model and operating-state interface,
 keeping replacement assets independent of the simulation.
+New structures follow the [structure style guide](STRUCTURE_STYLE_GUIDE.md).
 
 ## Production asset pipeline
 
