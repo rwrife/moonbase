@@ -23,9 +23,12 @@ project.godot                     # Application, main scene, renderer, input act
 export_presets.cfg               # Linux and single-threaded Web presets
 scenes/main.tscn                 # Composition entry point
 scripts/
-  main.gd                       # Fixed clock, commands and component wiring
+  main.gd                       # Fixed clock, commands, save/autosave lifecycle and component wiring
   building_catalog.gd           # Building definitions
   colony_simulation.gd          # State, validation, networks, deliveries, economy, charter and state export/import
+  save_schema.gd                # Versioned data-only v2 schema, strict validation and v1->v2 migration registry
+  save_storage_backend.gd       # Atomic desktop file backend, Web localStorage backend and test memory backend
+  colony_save_store.gd          # Slot management, overwrite conflict policy, backups and structured errors
   lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, landers, lighting
   lunar_module.gd               # Spacecraft-style procedural hardware and shared build/damage/repair/active states
   supply_lander.gd              # Original SELENE supply lander driven by authoritative delivery state
@@ -35,9 +38,10 @@ shaders/
   regolith.gdshader             # Displaced regolith, self-shadowing, grading and build overlay
   module_surface.gdshader       # Quilted thermal blankets and photovoltaic cell detail
   isometric_camera.gd           # Pan, orbit and zoom
-  colony_hud.gd                 # Presentation and command signals
+  colony_hud.gd                 # Presentation, save/recovery controls and command signals
 tests/
   test_simulation.gd           # Headless behavioral tests
+  test_saves.gd                # Headless save schema, migration, atomic write, backup and fault tests
   test_scene.gd                # Scene integration smoke tests
   capture_views.gd             # Look-development screenshot capture (needs a display)
 docs/                          # Design, roadmap, technical and art direction
@@ -115,11 +119,32 @@ so rebinding can be introduced without rewriting controllers.
 
 ## Persistence and compatibility
 
-Saving is deferred to its issue, but do not serialize scene nodes as game state.
-Plan a versioned data format containing seed, buildings, simulation time,
-resources, economy, research, crew, scenario flags, and RNG state.
-Never silently reset corrupt or unsupported saves. Preserve the file and show
-an actionable error. Web storage/persistence must be qualified independently.
+Persistence uses a versioned, data-only JSON schema (`SaveSchema`, currently v2
+with an explicit sequential migration path starting from v1 -> v2) and never
+serializes scene nodes or engine objects. Each save stores `colony_id`,
+`site_seed`, exact 64-bit `rng` (`seed`/`state` as integer strings to avoid
+53-bit JSON float truncation), simulation `time`, `resources` (including
+forward-compatible `storage`), `economy`, `crew` (`morale`, `health`, `roles`),
+`research`, `scenario` (`id`, `charter_complete`, `flags`, `last_report`),
+ordered `graded` pads, `buildings` (IDs, cells, kinds, construction/condition/
+repair states), and landing-pad `deliveries`.
+
+- `ColonySaveStore` validates schema, types, ranges, cell bounds, landmark
+  exclusions, unique IDs, and delivery references on a parsed copy before
+  mutating live simulation state.
+- Desktop (`SaveStorageBackend.FileBackend`) writes to `<slot>.json.tmp`,
+  flushes and verifies byte length, atomically rotates valid primaries into
+  `<slot>.json.bak`, and promotes the temporary file via rename.
+- Web (`SaveStorageBackend.WebBackend`) persists synchronously via
+  `window.localStorage` (with backup keys), classifies `QuotaExceededError` and
+  `SecurityError`/unavailable storage explicitly without clobbering existing
+  saves, and binds `visibilitychange` + `pagehide` lifecycle autosaves.
+- Restart/new game assigns a fresh `colony_id`. Default overwrite policy
+  (`SAME_COLONY_ONLY`) blocks accidental overwrites of a different colony's
+  manual or autosave slot until the player explicitly confirms overwrite.
+- Corrupt or unsupported future-version files are preserved untouched and
+  surface actionable HUD warnings plus one-click backup restoration when a
+  valid `.bak` exists.
 
 ## Validation and CI
 
@@ -128,13 +153,15 @@ On a fresh checkout, execute:
 ```sh
 godot --headless --path . --editor --import
 godot --headless --path . --script tests/test_simulation.gd
+godot --headless --path . --script tests/test_saves.gd
 godot --headless --path . --script tests/test_scene.gd
 ```
 
-Both test scripts return nonzero on failed checks. CI pins the engine version,
-verifies its SHA-512 release checksum, rejects import errors, runs both scripts,
-and has a bounded job timeout. Export/browser/performance qualification remains
-in the validation issue rather than being implied by headless test success.
+All three test scripts return nonzero on failed checks. CI pins the engine version,
+verifies its SHA-512 release checksum, rejects import errors, runs all three
+scripts, and has a bounded job timeout. Export/browser/performance qualification
+remains tracked in the validation issue rather than being implied by headless
+test success.
 
 Behavioral coverage should include:
 
