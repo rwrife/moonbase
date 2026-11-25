@@ -10,7 +10,9 @@ The playable foundation includes a procedural, deformable lunar surface
 (heightfield regolith with craters, rocks, pebbles, immovable landmark craters and
 boulders, and bulldozer grading), eight building types, grid construction and demolition, local utility networks,
 lunar night, crew morale, upkeep, funding, science, exports, and a founding
-charter objective. Buildings are still **placeholder art, not AAA-quality assets**.
+charter objective. Original procedural buildings now feature spacecraft-style
+pressure hulls, thermal insulation, plumbing, radiator fins, solar cells, and
+status-driven operating animations. They are **not production/AAA assets**.
 
 Research trees, saves, detailed crew/logistics, hazards beyond night, campaign,
 production art, and audio are future work in [the issue roadmap](docs/ROADMAP.md).

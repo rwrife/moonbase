@@ -374,7 +374,7 @@ func synchronize(simulation: ColonySimulation) -> void:
 		if not models.has(cell):
 			_create_module(cell, building["kind"])
 		models[cell].position = surface_position(cell)
-		indicators[cell].material_override = good_material if building["active"] else bad_material
+		models[cell].set_active(building["active"])
 	sun.light_energy = 0.22 if simulation.is_night() else DAY_ENERGY
 	sun.light_color = Color(0.55, 0.66, 1.0) if simulation.is_night() else DAY_COLOR
 
@@ -386,51 +386,14 @@ func show_preview(cell: Vector2i, valid: bool, enabled: bool) -> void:
 
 
 func _create_module(cell: Vector2i, kind: String) -> void:
-	var model := Node3D.new()
-	model.set_meta("kind", kind)
+	var model := LunarModule.new()
+	model.build(kind)
 	model.position = surface_position(cell)
 	add_child(model)
 	models[cell] = model
-	var color: Color = BuildingCatalog.definition(kind)["color"]
-	var hull := _material(color)
-	var dark := _material(Color(0.1, 0.15, 0.2))
-	var white := _material(Color(0.76, 0.79, 0.82))
-	if kind == "link":
-		_box(model, Vector3(2.25, 0.18, 0.3), Vector3(0, 0.12, 0), hull)
-		_box(model, Vector3(0.3, 0.18, 2.25), Vector3(0, 0.12, 0), hull)
-	else:
-		_box(model, Vector3(1.95, 0.12, 1.95), Vector3(0, 0.06, 0), dark)
-		match kind:
-			"solar":
-				for x in [-0.5, 0.5]:
-					_box(model, Vector3(0.1, 0.65, 0.1), Vector3(x, 0.45, 0), white)
-					var panel := _box(model, Vector3(0.9, 0.08, 1.7), Vector3(x, 0.85, 0), hull)
-					panel.rotation_degrees.x = -15
-					for y in [-0.5, 0.0, 0.5]:
-						_box(panel, Vector3(0.86, 0.012, 0.025), Vector3(0, 0.045, y), white)
-			"reactor":
-				_cylinder(model, 0.62, 1.4, Vector3(0, 0.85, 0), hull, 0.7)
-				_cylinder(model, 0.75, 0.12, Vector3(0, 1.2, 0), white)
-				for x in [-0.78, 0.78]:
-					_box(model, Vector3(0.22, 0.65, 1.4), Vector3(x, 0.5, 0), dark)
-			"oxygen", "ice":
-				_box(model, Vector3(0.9, 0.8, 1.45), Vector3(0.35, 0.55, 0), hull)
-				for y in [-0.45, 0.45]:
-					_cylinder(model, 0.26, 1.1, Vector3(-0.5, 0.68, y), white)
-				if kind == "ice":
-					_box(model, Vector3(0.18, 1.7, 0.18), Vector3(0.3, 1.2, 0), dark)
-			"mine":
-				_box(model, Vector3(1.4, 0.7, 1.4), Vector3(0, 0.55, 0), hull)
-				_cylinder(model, 0.38, 0.8, Vector3(0, 1.15, 0), dark, 0.6)
-				_box(model, Vector3(0.5, 0.3, 1.9), Vector3(0.7, 0.4, 0), white)
-			_:
-				_box(model, Vector3(1.65, 0.85, 1.4), Vector3(0, 0.63, 0), hull)
-				_box(model, Vector3(1.3, 0.16, 1.5), Vector3(0, 1.13, 0), white)
-				for x in [-0.45, 0.0, 0.45]:
-					_box(model, Vector3(0.22, 0.25, 0.035), Vector3(x, 0.78, -0.72),
-						neutral_material)
-				if kind == "lab":
-					_cylinder(model, 0.18, 0.8, Vector3(0.5, 1.55, 0.3), white)
-					_cylinder(model, 0.38, 0.12, Vector3(0.5, 1.95, 0.3), hull, 0.4)
-	indicators[cell] = _box(model, Vector3(0.3, 0.05, 0.15),
-		Vector3(0, 0.16, -0.98), good_material)
+	indicators[cell] = model.status
+
+
+func advance_modules(delta: float) -> void:
+	for model: LunarModule in models.values():
+		model.advance(delta)
