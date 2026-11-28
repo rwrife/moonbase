@@ -34,6 +34,9 @@ var graded: Dictionary = {}
 ## Cells covered by immovable landmark craters or boulders -> "crater" / "boulder".
 var blocked: Dictionary = SiteSurvey.blocked_cells(MAP_RADIUS)
 var networks: Array[Dictionary] = []
+var last_network_evaluation: Dictionary = {}
+var reserve_policy: String = UtilityNetwork.RESERVE_POLICY_PROTECT_ESSENTIAL
+var reserve_floor := 0.25
 ## Independent delivery schedules keyed by landing pad building id.
 var deliveries: Dictionary = {}
 var credits := STARTING_CREDITS
@@ -69,6 +72,8 @@ func reset() -> void:
 	exports = 0.0
 	next_id = 1
 	charter_complete = false
+	reserve_policy = UtilityNetwork.RESERVE_POLICY_PROTECT_ESSENTIAL
+	reserve_floor = 0.25
 	_add(Vector2i(-3, 0), "ice")
 	_add(Vector2i(-2, 0), "oxygen")
 	_add(Vector2i(-1, 0), "habitat")
@@ -92,6 +97,9 @@ func _add(cell: Vector2i, kind: String) -> int:
 		"build_progress": 1.0,
 		"condition": CONDITION_OPERATIONAL,
 		"repair_progress": 1.0,
+		"isolated": false,
+		"status_reason": "Operational",
+		"stored": {},
 	}
 	graded[cell] = true
 	next_id += 1
@@ -142,6 +150,27 @@ func set_building_condition(cell: Vector2i, condition: String,
 	else:
 		building["repair_progress"] = clampf(float(building.get("repair_progress", 0.0)), 0.0, 1.0)
 	_sync_delivery_for_pad_state(cell)
+	recalculate()
+	changed.emit()
+	return true
+
+
+func set_building_isolated(cell: Vector2i, isolated: bool) -> bool:
+	if not buildings.has(cell):
+		return false
+	buildings[cell]["isolated"] = isolated
+	_sync_delivery_for_pad_state(cell)
+	recalculate()
+	changed.emit()
+	return true
+
+
+func set_reserve_policy(policy: String, floor_ratio: float = -1.0) -> bool:
+	if not (policy in UtilityNetwork.VALID_RESERVE_POLICIES):
+		return false
+	reserve_policy = policy
+	if floor_ratio >= 0.0:
+		reserve_floor = clampf(floor_ratio, 0.0, 1.0)
 	recalculate()
 	changed.emit()
 	return true
@@ -254,95 +283,25 @@ func recalculate() -> void:
 	networks.clear()
 	crew = 0
 	safe_crew = 0
-	var visited: Dictionary = {}
-	for origin: Vector2i in buildings:
-		if visited.has(origin):
-			continue
-		var queue: Array[Vector2i] = [origin]
-		var cells: Array[Vector2i] = []
-		visited[origin] = true
-		var cursor := 0
-		while cursor < queue.size():
-			var cell := queue[cursor]
-			cursor += 1
-			cells.append(cell)
-			for direction in NEIGHBORS:
-				var neighbor := cell + direction
-				if buildings.has(neighbor) and not visited.has(neighbor):
-					visited[neighbor] = true
-					queue.append(neighbor)
-		var network := _evaluate_network(cells)
-		var index := networks.size()
-		networks.append(network)
-		for cell in cells:
-			buildings[cell]["network"] = index
-
-
-func _evaluate_network(cells: Array[Vector2i]) -> Dictionary:
-	var supply := {"power": 0.0, "water": 0.0, "oxygen": 0.0, "heat": 0.0}
-	var demand := {"power": 0.0, "water": 0.0, "oxygen": 0.0, "heat": 0.0}
-	for cell in cells:
-		var building: Dictionary = buildings[cell]
-		if not is_building_operational(building):
-			continue
-		var kind: String = building["kind"]
-		var data := BuildingCatalog.definition(kind)
-		if kind != "solar" or not is_night():
-			supply["power"] += float(data.get("power", 0))
-		for utility: String in demand:
-			demand[utility] += float(data.get(utility + "_use", 0))
-		if kind == "habitat":
-			crew += 8
-	var powered: bool = supply["power"] >= demand["power"]
-	# Evaluate dependencies from totals, never by consumer insertion order.
-	for cell in cells:
-		var building: Dictionary = buildings[cell]
-		if not is_building_operational(building):
-			continue
-		if building["kind"] == "ice" and powered:
-			supply["water"] += float(BuildingCatalog.definition("ice")["water"])
-	var watered: bool = supply["water"] >= demand["water"]
-	for cell in cells:
-		var building: Dictionary = buildings[cell]
-		if not is_building_operational(building):
-			continue
-		var kind: String = building["kind"]
-		var data := BuildingCatalog.definition(kind)
-		if kind == "reactor" or (kind == "oxygen" and powered and watered):
-			supply["heat"] += float(data.get("heat", 0))
-			supply["oxygen"] += float(data.get("oxygen", 0))
-	var supported: bool = (
-		powered and watered
-		and supply["oxygen"] >= demand["oxygen"]
-		and supply["heat"] >= demand["heat"]
+	last_network_evaluation = UtilityNetwork.evaluate(
+		buildings, is_night(), BuildingCatalog.DATA, reserve_policy, reserve_floor
 	)
-	for cell in cells:
+	var eval_networks: Array = last_network_evaluation["networks"]
+	for net: Dictionary in eval_networks:
+		networks.append(net)
+	var active_map: Dictionary = last_network_evaluation["active"]
+	var reasons: Dictionary = last_network_evaluation["status_reasons"]
+	var cell_to_net: Dictionary = last_network_evaluation["cell_to_network"]
+	for cell: Vector2i in buildings:
 		var building: Dictionary = buildings[cell]
-		if not is_building_operational(building):
-			building["active"] = false
-			continue
-		var kind: String = building["kind"]
-		var active := powered
-		match kind:
-			"link", "reactor", "landing_pad":
-				active = true
-			"solar":
-				active = not is_night()
-			"oxygen":
-				active = powered and watered
-			"habitat":
-				active = supported
-				if active:
-					safe_crew += 8
-		building["active"] = active
-	var shortages: Array[String] = []
-	for utility: String in demand:
-		if supply[utility] < demand[utility]:
-			shortages.append(utility.capitalize())
-	return {
-		"cells": cells, "supply": supply, "demand": demand,
-		"supported": supported, "shortages": shortages
-	}
+		building["network"] = int(cell_to_net.get(cell, -1))
+		var is_active := bool(active_map.get(cell, false))
+		building["active"] = is_active
+		building["status_reason"] = str(reasons.get(cell, "Operational" if is_active else "Offline"))
+		if building["kind"] == "habitat" and is_building_operational(building):
+			crew += 8
+			if is_active:
+				safe_crew += 8
 
 
 func advance(elapsed_days: float) -> void:
@@ -519,6 +478,8 @@ func tick() -> void:
 func _tick_day() -> void:
 	day += 1
 	recalculate()
+	if UtilityNetwork.apply_storage_step(buildings, last_network_evaluation, 1.0, BuildingCatalog.DATA):
+		recalculate()
 	var upkeep := 0.0
 	var crew_safe := crew > 0 and safe_crew == crew
 	for cell: Vector2i in buildings:
@@ -576,6 +537,8 @@ func export_state() -> Dictionary:
 			"build_progress": float(b.get("build_progress", 1.0)),
 			"condition": str(b.get("condition", CONDITION_OPERATIONAL)),
 			"repair_progress": float(b.get("repair_progress", 1.0)),
+			"isolated": bool(b.get("isolated", false)),
+			"stored": (b.get("stored", {}) as Dictionary).duplicate(true),
 		})
 	var delivery_list: Array = []
 	var ids: Array = deliveries.keys()
@@ -603,6 +566,8 @@ func export_state() -> Dictionary:
 		"charter_complete": charter_complete,
 		"last_report": last_report,
 		"next_id": next_id,
+		"reserve_policy": reserve_policy,
+		"reserve_floor": reserve_floor,
 		"graded": graded_list,
 		"buildings": building_list,
 		"deliveries": delivery_list,
@@ -626,6 +591,12 @@ func import_state(state: Dictionary) -> bool:
 	charter_complete = bool(state.get("charter_complete", false))
 	last_report = str(state.get("last_report", ""))
 	next_id = int(state.get("next_id", 1))
+	var raw_policy := str(state.get("reserve_policy", UtilityNetwork.RESERVE_POLICY_PROTECT_ESSENTIAL))
+	reserve_policy = (
+		raw_policy if raw_policy in UtilityNetwork.VALID_RESERVE_POLICIES
+		else UtilityNetwork.RESERVE_POLICY_PROTECT_ESSENTIAL
+	)
+	reserve_floor = clampf(float(state.get("reserve_floor", 0.25)), 0.0, 1.0)
 	for raw_cell: Array in state.get("graded", []):
 		graded[Vector2i(int(raw_cell[0]), int(raw_cell[1]))] = true
 	for raw_b: Dictionary in state.get("buildings", []):
@@ -645,6 +616,9 @@ func import_state(state: Dictionary) -> bool:
 			"build_progress": clampf(float(raw_b.get("build_progress", 1.0)), 0.0, 1.0),
 			"condition": condition,
 			"repair_progress": clampf(float(raw_b.get("repair_progress", 1.0)), 0.0, 1.0),
+			"isolated": bool(raw_b.get("isolated", false)),
+			"status_reason": "Operational",
+			"stored": (raw_b.get("stored", {}) as Dictionary).duplicate(true) if raw_b.get("stored") is Dictionary else {},
 		}
 		graded[cell] = true
 		next_id = maxi(next_id, int(raw_b["id"]) + 1)
