@@ -212,8 +212,13 @@ func test_landing_pad_deliveries() -> void:
 		"Starter landing pad must begin with a visible approaching supply ship")
 	check(sim.supplies == 0.0 and not starter_delivery["cargo_credited"],
 		"Supply credit must not be applied before landing completes")
-	var expected_first := ColonySimulation.DELIVERY_CREDIT_TIME - ColonySimulation.STARTER_INITIAL_CYCLE_TIME
-	check(is_equal_approx(sim.time_to_next_delivery(int(starter_delivery["building_id"])), expected_first),
+	var starter_id: int = int(starter_delivery["building_id"])
+	var expected_first := (
+		ColonySimulation.DELIVERY_VISIT_DURATION
+		- ColonySimulation.DELIVERY_DEPART_DURATION
+		- ColonySimulation.STARTER_INITIAL_APPROACH_OFFSET
+	)
+	check(is_equal_approx(sim.time_to_next_delivery(starter_id), expected_first),
 		"Starter landing pad must have a predictable first-delivery schedule")
 
 	# Advance into descending and delivering, stopping just before credit completes.
@@ -232,20 +237,42 @@ func test_landing_pad_deliveries() -> void:
 	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Departure frames must never double-credit supplies")
 
-	# Fixed interval: advance exactly two full intervals (12 days) -> +2 deliveries.
-	sim.advance(ColonySimulation.SUPPLY_DELIVERY_INTERVAL * 2.0)
-	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT * 3.0),
-		"Repeated deliveries must occur at the fixed interval")
+	# Less frequent randomized interval: 6 days is no longer enough for another delivery.
+	var next_wait := sim.time_to_next_delivery(starter_id)
+	check(next_wait >= ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MIN - ColonySimulation.DELIVERY_DEPART_DURATION
+		and next_wait <= ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MAX + ColonySimulation.DELIVERY_DEPART_DURATION,
+		"Next delivery wait must stay within the slower randomized interval bounds")
+	sim.advance(6.0)
+	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
+		"Supply ships must arrive less often than every 6 days")
+	sim.advance(next_wait - 6.0 + 0.05)
+	check(is_equal_approx(sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT * 2.0),
+		"Second delivery must credit when its randomized schedule completes")
+	var visit2_interval: float = float(sim.delivery_for_cell(pad_cell)["interval"])
+	check(visit2_interval >= ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MIN
+		and visit2_interval <= ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MAX,
+		"Rolled visit interval must stay within configured bounds")
 
-	# Two operational pads yield twice the supplies of one over equivalent intervals.
+	# Multiple landing pads have independent randomized schedules and scale supplies.
 	var one_pad := ColonySimulation.new()
-	var two_pads := ColonySimulation.new()
-	check(two_pads.place("landing_pad", Vector2i(3, -2)), "Player must be able to build additional landing pads")
-	var span := ColonySimulation.SUPPLY_DELIVERY_INTERVAL * 3.0
-	one_pad.advance(span)
-	two_pads.advance(span)
-	check(is_equal_approx(two_pads.supplies, one_pad.supplies * 2.0),
-		"Two operational pads must yield twice the supplies of one over equivalent intervals")
+	var multi_pad := ColonySimulation.new()
+	var pad2_cell := Vector2i(3, -2)
+	var pad3_cell := Vector2i(5, -2)
+	check(multi_pad.place("landing_pad", pad2_cell), "Player must be able to build additional landing pads")
+	check(multi_pad.place("landing_pad", pad3_cell), "Player must be able to build a third landing pad")
+	var t2 := multi_pad.time_to_next_delivery(int(multi_pad.buildings[pad2_cell]["id"]))
+	var t3 := multi_pad.time_to_next_delivery(int(multi_pad.buildings[pad3_cell]["id"]))
+	check(not is_equal_approx(t2, t3),
+		"Multiple landing pads placed together must have randomized, staggered arrival times")
+	var pad_intervals: Dictionary = {}
+	for cell in [pad_cell, pad2_cell, pad3_cell]:
+		pad_intervals[float(multi_pad.delivery_for_cell(cell)["interval"])] = true
+	check(pad_intervals.size() >= 2,
+		"Multiple landing pads must not share identical fixed intervals")
+	one_pad.advance(120.0)
+	multi_pad.advance(120.0)
+	check(multi_pad.supplies > one_pad.supplies * 2.0,
+		"Additional operational pads must deliver substantially more supplies over time")
 
 	# Demolishing a pad before delivery completes cancels delivery with zero credit.
 	var abort_sim := ColonySimulation.new()
@@ -253,7 +280,7 @@ func test_landing_pad_deliveries() -> void:
 	check(abort_sim.supplies == 0.0, "Supply must still be zero before offload finishes")
 	check(abort_sim.demolish(pad_cell), "Demolishing pad during descent must succeed")
 	check(abort_sim.deliveries.is_empty(), "Demolishing pad must remove its delivery schedule")
-	abort_sim.advance(10.0)
+	abort_sim.advance(30.0)
 	check(abort_sim.supplies == 0.0, "Removed pad must not leave stranded deliveries")
 
 	# Demolishing a pad after credit during departure preserves credited supplies without duplication.
@@ -262,15 +289,15 @@ func test_landing_pad_deliveries() -> void:
 	check(is_equal_approx(post_sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Credited supply must exist during departure")
 	post_sim.demolish(pad_cell)
-	post_sim.advance(12.0)
+	post_sim.advance(30.0)
 	check(is_equal_approx(post_sim.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Demolishing pad during departure must preserve credited cargo without further deliveries")
 
 	# Restart restores starter pad and initial schedule.
-	two_pads.reset()
-	check(two_pads.supplies == 0.0 and two_pads.deliveries.size() == 1,
+	multi_pad.reset()
+	check(multi_pad.supplies == 0.0 and multi_pad.deliveries.size() == 1,
 		"Restart must reset supplies and restore single starter delivery")
-	check(two_pads.delivery_for_cell(pad_cell)["phase"] == "approaching",
+	check(multi_pad.delivery_for_cell(pad_cell)["phase"] == "approaching",
 		"Restart must restore starter approaching supply ship")
 
 
@@ -312,7 +339,11 @@ func test_structure_states_and_serialization() -> void:
 	save_src.set_building_build_progress(Vector2i(-3, 0), 0.5)
 	save_src.set_building_condition(Vector2i(-2, 0), ColonySimulation.CONDITION_DAMAGED)
 	save_src.set_building_condition(Vector2i(-1, 0), ColonySimulation.CONDITION_REPAIRING, 0.4)
-	var first_t := ColonySimulation.DELIVERY_CREDIT_TIME - ColonySimulation.STARTER_INITIAL_CYCLE_TIME
+	var first_t := (
+		ColonySimulation.DELIVERY_VISIT_DURATION
+		- ColonySimulation.DELIVERY_DEPART_DURATION
+		- ColonySimulation.STARTER_INITIAL_APPROACH_OFFSET
+	)
 	# Snapshot mid-descent (before credit).
 	save_src.advance(first_t - 0.5)
 	var snap_before := save_src.export_state()
@@ -333,9 +364,11 @@ func test_structure_states_and_serialization() -> void:
 	var snap_after := restored_before.export_state()
 	var restored_after := ColonySimulation.new()
 	check(restored_after.import_state(snap_after), "Import mid-departure state must succeed")
+	var pad_id: int = int(restored_after.buildings[pad_cell]["id"])
+	var next_t := restored_after.time_to_next_delivery(pad_id)
 	restored_after.advance(1.0)
 	check(is_equal_approx(restored_after.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Restored departing visit must not duplicate already-credited cargo")
-	restored_after.advance(ColonySimulation.SUPPLY_DELIVERY_INTERVAL)
+	restored_after.advance(next_t - 1.0 + 0.05)
 	check(is_equal_approx(restored_after.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT * 2.0),
 		"Restored departing visit must resume recurring deliveries on schedule")

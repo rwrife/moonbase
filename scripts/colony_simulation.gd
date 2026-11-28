@@ -24,12 +24,18 @@ const VALID_CONDITIONS: Array[String] = [
 const STARTER_LANDING_PAD_CELL := Vector2i(0, -2)
 const SUPPLY_DELIVERY_AMOUNT := 4.0
 const SUPPLY_DELIVERY_UNIT := "t"
-const SUPPLY_DELIVERY_INTERVAL := 6.0
-const DELIVERY_PHASE_APPROACH := 3.0
-const DELIVERY_PHASE_DESCEND := 4.2
-const DELIVERY_PHASE_DELIVER := 5.0
-const DELIVERY_CREDIT_TIME := 5.4
-const STARTER_INITIAL_CYCLE_TIME := 3.2
+const SUPPLY_DELIVERY_INTERVAL := 20.0
+const SUPPLY_DELIVERY_INTERVAL_MIN := 14.0
+const SUPPLY_DELIVERY_INTERVAL_MAX := 26.0
+const DELIVERY_APPROACH_DURATION := 1.2
+const DELIVERY_DESCEND_DURATION := 0.8
+const DELIVERY_OFFLOAD_DURATION := 0.4
+const DELIVERY_DEPART_DURATION := 0.6
+const DELIVERY_VISIT_DURATION := (
+	DELIVERY_APPROACH_DURATION + DELIVERY_DESCEND_DURATION
+	+ DELIVERY_OFFLOAD_DURATION + DELIVERY_DEPART_DURATION
+)
+const STARTER_INITIAL_APPROACH_OFFSET := 0.2
 
 var buildings: Dictionary = {}
 ## Cells flattened into construction pads (insertion order is grading order).
@@ -78,8 +84,10 @@ func reset() -> void:
 	_add(Vector2i(0, 0), "solar")
 	var pad_id := _add(STARTER_LANDING_PAD_CELL, "landing_pad")
 	if deliveries.has(pad_id):
-		deliveries[pad_id]["cycle_time"] = STARTER_INITIAL_CYCLE_TIME
-		_refresh_delivery_phase(deliveries[pad_id])
+		var entry: Dictionary = deliveries[pad_id]
+		var approach_t := _delivery_approach_time(float(entry["interval"]))
+		entry["cycle_time"] = approach_t + STARTER_INITIAL_APPROACH_OFFSET
+		_refresh_delivery_phase(entry)
 	last_report = "Founding grant received. Supply lander approaching; build reliable power before night."
 	recalculate()
 	changed.emit()
@@ -103,6 +111,7 @@ func _add(cell: Vector2i, kind: String) -> int:
 			"building_id": id,
 			"cell": cell,
 			"cycle_time": 0.0,
+			"interval": _roll_delivery_interval(id, 1, cell),
 			"phase": "waiting",
 			"phase_progress": 0.0,
 			"visit_id": 1,
@@ -111,6 +120,22 @@ func _add(cell: Vector2i, kind: String) -> int:
 		_refresh_delivery_phase(entry)
 		deliveries[id] = entry
 	return id
+
+
+static func _roll_delivery_interval(building_id: int, visit_id: int, cell: Vector2i) -> float:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([building_id, visit_id, cell.x, cell.y])
+	rng.randf()
+	var span := SUPPLY_DELIVERY_INTERVAL_MAX - SUPPLY_DELIVERY_INTERVAL_MIN
+	return snappedf(SUPPLY_DELIVERY_INTERVAL_MIN + rng.randf() * span, 0.1)
+
+
+static func _delivery_approach_time(interval: float) -> float:
+	return maxf(0.0, interval - DELIVERY_VISIT_DURATION)
+
+
+static func _delivery_credit_time(interval: float) -> float:
+	return maxf(0.0, interval - DELIVERY_DEPART_DURATION)
 
 
 func is_building_operational(building: Dictionary) -> bool:
@@ -161,7 +186,8 @@ func _sync_delivery_for_pad_state(cell: Vector2i) -> void:
 		return
 	if not is_building_operational(building):
 		var entry: Dictionary = deliveries[id]
-		if not entry["cargo_credited"] and float(entry["cycle_time"]) >= DELIVERY_PHASE_APPROACH:
+		var approach_t := _delivery_approach_time(float(entry.get("interval", SUPPLY_DELIVERY_INTERVAL)))
+		if not entry["cargo_credited"] and float(entry["cycle_time"]) >= approach_t:
 			entry["cycle_time"] = 0.0
 			_refresh_delivery_phase(entry)
 
@@ -397,29 +423,33 @@ func advance_deliveries(elapsed_days: float) -> bool:
 		var operational := is_building_operational(building) and bool(building["active"])
 		var remaining := elapsed_days
 		while remaining > 0.000001:
+			var interval: float = maxf(DELIVERY_VISIT_DURATION, float(entry.get("interval", SUPPLY_DELIVERY_INTERVAL)))
+			var approach_t := _delivery_approach_time(interval)
+			var credit_t := _delivery_credit_time(interval)
 			var cycle_time: float = float(entry["cycle_time"])
 			var credited: bool = bool(entry["cargo_credited"])
 			if not operational:
 				if credited:
-					var to_depart := SUPPLY_DELIVERY_INTERVAL - cycle_time
+					var to_depart := interval - cycle_time
 					if remaining >= to_depart - 0.000001:
 						entry["cycle_time"] = 0.0
 						entry["cargo_credited"] = false
 						entry["visit_id"] = int(entry["visit_id"]) + 1
+						entry["interval"] = _roll_delivery_interval(id, int(entry["visit_id"]), cell)
 						remaining = 0.0
 					else:
 						entry["cycle_time"] = cycle_time + remaining
 						remaining = 0.0
 				else:
-					if cycle_time >= DELIVERY_PHASE_APPROACH:
+					if cycle_time >= approach_t:
 						entry["cycle_time"] = 0.0
 					remaining = 0.0
 				break
 			if not credited:
-				var to_credit := DELIVERY_CREDIT_TIME - cycle_time
+				var to_credit := credit_t - cycle_time
 				if remaining >= to_credit - 0.000001:
 					remaining = maxf(0.0, remaining - maxf(0.0, to_credit))
-					entry["cycle_time"] = DELIVERY_CREDIT_TIME
+					entry["cycle_time"] = credit_t
 					entry["cargo_credited"] = true
 					supplies += SUPPLY_DELIVERY_AMOUNT
 					deliveries_completed += 1
@@ -431,12 +461,13 @@ func advance_deliveries(elapsed_days: float) -> bool:
 					entry["cycle_time"] = cycle_time + remaining
 					remaining = 0.0
 			else:
-				var to_reset := SUPPLY_DELIVERY_INTERVAL - cycle_time
+				var to_reset := interval - cycle_time
 				if remaining >= to_reset - 0.000001:
 					remaining = maxf(0.0, remaining - maxf(0.0, to_reset))
 					entry["cycle_time"] = 0.0
 					entry["cargo_credited"] = false
 					entry["visit_id"] = int(entry["visit_id"]) + 1
+					entry["interval"] = _roll_delivery_interval(id, int(entry["visit_id"]), cell)
 				else:
 					entry["cycle_time"] = cycle_time + remaining
 					remaining = 0.0
@@ -445,31 +476,29 @@ func advance_deliveries(elapsed_days: float) -> bool:
 
 
 func _refresh_delivery_phase(entry: Dictionary) -> void:
-	var t := clampf(float(entry["cycle_time"]), 0.0, SUPPLY_DELIVERY_INTERVAL)
+	var interval := maxf(DELIVERY_VISIT_DURATION, float(entry.get("interval", SUPPLY_DELIVERY_INTERVAL)))
+	entry["interval"] = interval
+	var approach_t := _delivery_approach_time(interval)
+	var descend_t := approach_t + DELIVERY_APPROACH_DURATION
+	var deliver_t := descend_t + DELIVERY_DESCEND_DURATION
+	var credit_t := _delivery_credit_time(interval)
+	var t := clampf(float(entry["cycle_time"]), 0.0, interval)
 	entry["cycle_time"] = t
-	if t < DELIVERY_PHASE_APPROACH:
+	if t < approach_t:
 		entry["phase"] = "waiting"
-		entry["phase_progress"] = t / DELIVERY_PHASE_APPROACH
-	elif t < DELIVERY_PHASE_DESCEND:
+		entry["phase_progress"] = (t / approach_t) if approach_t > 0.0 else 1.0
+	elif t < descend_t:
 		entry["phase"] = "approaching"
-		entry["phase_progress"] = (t - DELIVERY_PHASE_APPROACH) / (
-			DELIVERY_PHASE_DESCEND - DELIVERY_PHASE_APPROACH
-		)
-	elif t < DELIVERY_PHASE_DELIVER:
+		entry["phase_progress"] = (t - approach_t) / DELIVERY_APPROACH_DURATION
+	elif t < deliver_t:
 		entry["phase"] = "descending"
-		entry["phase_progress"] = (t - DELIVERY_PHASE_DESCEND) / (
-			DELIVERY_PHASE_DELIVER - DELIVERY_PHASE_DESCEND
-		)
-	elif t < DELIVERY_CREDIT_TIME:
+		entry["phase_progress"] = (t - descend_t) / DELIVERY_DESCEND_DURATION
+	elif t < credit_t:
 		entry["phase"] = "delivering"
-		entry["phase_progress"] = (t - DELIVERY_PHASE_DELIVER) / (
-			DELIVERY_CREDIT_TIME - DELIVERY_PHASE_DELIVER
-		)
+		entry["phase_progress"] = (t - deliver_t) / DELIVERY_OFFLOAD_DURATION
 	else:
 		entry["phase"] = "departing"
-		entry["phase_progress"] = (t - DELIVERY_CREDIT_TIME) / (
-			SUPPLY_DELIVERY_INTERVAL - DELIVERY_CREDIT_TIME
-		)
+		entry["phase_progress"] = (t - credit_t) / DELIVERY_DEPART_DURATION
 
 
 func delivery_for_cell(cell: Vector2i) -> Dictionary:
@@ -485,10 +514,15 @@ func time_to_next_delivery(building_id: int) -> float:
 	if not deliveries.has(building_id):
 		return -1.0
 	var entry: Dictionary = deliveries[building_id]
+	var interval := maxf(DELIVERY_VISIT_DURATION, float(entry.get("interval", SUPPLY_DELIVERY_INTERVAL)))
 	var t := float(entry["cycle_time"])
+	var credit_t := _delivery_credit_time(interval)
 	if not bool(entry["cargo_credited"]):
-		return maxf(0.0, DELIVERY_CREDIT_TIME - t)
-	return maxf(0.0, (SUPPLY_DELIVERY_INTERVAL - t) + DELIVERY_CREDIT_TIME)
+		return maxf(0.0, credit_t - t)
+	var next_interval := _roll_delivery_interval(
+		building_id, int(entry["visit_id"]) + 1, entry["cell"]
+	)
+	return maxf(0.0, (interval - t) + _delivery_credit_time(next_interval))
 
 
 func next_delivery_summary() -> Dictionary:
@@ -609,6 +643,7 @@ func export_state() -> Dictionary:
 			"building_id": int(d["building_id"]),
 			"cell": [cell.x, cell.y],
 			"cycle_time": float(d["cycle_time"]),
+			"interval": float(d.get("interval", SUPPLY_DELIVERY_INTERVAL)),
 			"visit_id": int(d["visit_id"]),
 			"cargo_credited": bool(d["cargo_credited"]),
 		})
@@ -678,13 +713,21 @@ func import_state(state: Dictionary) -> bool:
 			continue
 		if buildings[cell]["kind"] != "landing_pad":
 			continue
+		var visit_id := int(raw_d.get("visit_id", 1))
+		var default_interval := _roll_delivery_interval(id, visit_id, cell)
+		var interval := clampf(
+			float(raw_d.get("interval", default_interval)),
+			DELIVERY_VISIT_DURATION,
+			SUPPLY_DELIVERY_INTERVAL_MAX
+		)
 		var entry := {
 			"building_id": id,
 			"cell": cell,
-			"cycle_time": clampf(float(raw_d.get("cycle_time", 0.0)), 0.0, SUPPLY_DELIVERY_INTERVAL),
+			"cycle_time": clampf(float(raw_d.get("cycle_time", 0.0)), 0.0, interval),
+			"interval": interval,
 			"phase": "waiting",
 			"phase_progress": 0.0,
-			"visit_id": int(raw_d.get("visit_id", 1)),
+			"visit_id": visit_id,
 			"cargo_credited": bool(raw_d.get("cargo_credited", false)),
 		}
 		_refresh_delivery_phase(entry)
@@ -697,6 +740,7 @@ func import_state(state: Dictionary) -> bool:
 				"building_id": int(b["id"]),
 				"cell": cell,
 				"cycle_time": 0.0,
+				"interval": _roll_delivery_interval(int(b["id"]), 1, cell),
 				"phase": "waiting",
 				"phase_progress": 0.0,
 				"visit_id": 1,
