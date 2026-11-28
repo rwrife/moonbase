@@ -51,7 +51,7 @@ const DATA: Dictionary = {
 	"landing_pad": {
 		"name": "Landing pad", "cost": 240, "upkeep": 0,
 		"color": Color(0.86, 0.68, 0.28),
-		"description": "Receives +4 t supplies every 6 days per operational pad. Self-powered beacon."
+		"description": "Receives +4 t supplies every 14-26 days per operational pad. Self-powered beacon."
 	}
 }
 

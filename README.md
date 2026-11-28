@@ -10,7 +10,7 @@ The playable foundation includes a procedural, deformable lunar surface
 (heightfield regolith with craters, rocks, pebbles, immovable landmark craters and
 boulders, and bulldozer grading), nine building types (including a starter landing
 pad with recurring SELENE supply lander visits delivering +4 t supplies every
-6 days per operational pad), grid construction and demolition, local utility
+14-26 days per operational pad), grid construction and demolition, local utility
 networks, lunar night, crew morale, upkeep, funding, science, exports, and a
 founding charter objective. Original procedural buildings feature spacecraft-style
 pressure hulls, thermal insulation, plumbing, radiator fins, solar cells,

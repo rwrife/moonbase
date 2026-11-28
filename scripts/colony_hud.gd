@@ -189,19 +189,21 @@ func update_delivery_status(simulation: ColonySimulation, selected: Vector2i) ->
 	var summary := simulation.next_delivery_summary()
 	var active_pads: int = summary["active_pads"]
 	if active_pads > 0:
-		logistics.text = "Supply pads: %d active (+%.0f %s / %.0fd each)   |   Next landing: %.1fd (%s)" % [
+		logistics.text = "Supply pads: %d active (+%.0f %s / %.0f-%.0fd each)   |   Next landing: %.1fd (%s)" % [
 			active_pads,
 			ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
 			ColonySimulation.SUPPLY_DELIVERY_UNIT,
-			ColonySimulation.SUPPLY_DELIVERY_INTERVAL,
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MIN,
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MAX,
 			float(summary["next_time"]),
 			ColonySimulation.phase_label(str(summary["next_phase"]))
 		]
 	else:
-		logistics.text = "Supply pads: 0 active  (Build a Landing pad for +%.0f %s every %.0fd)" % [
+		logistics.text = "Supply pads: 0 active  (Build a Landing pad for +%.0f %s every %.0f-%.0fd)" % [
 			ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
 			ColonySimulation.SUPPLY_DELIVERY_UNIT,
-			ColonySimulation.SUPPLY_DELIVERY_INTERVAL
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MIN,
+			ColonySimulation.SUPPLY_DELIVERY_INTERVAL_MAX
 		]
 	if simulation.buildings.has(selected) and simulation.buildings[selected]["kind"] == "landing_pad":
 		inspect(simulation, selected)
