@@ -3,6 +3,8 @@ extends Node3D
 
 const SURFACE_SHADER := preload("res://shaders/module_surface.gdshader")
 const DUST_COLOR := Color(0.23, 0.22, 0.20)
+const SERVICE_PORT_Y := 0.78
+const POWER_PORT_Y := 0.28
 
 var active := false
 var operating_time := 0.0
@@ -10,6 +12,9 @@ var state_time := 0.0
 var build_progress := 1.0
 var condition := ColonySimulation.CONDITION_OPERATIONAL
 var repair_progress := 1.0
+var facing := 0
+var service_mask := 0
+var power_mask := 0
 
 var foundation_root: Node3D
 var body_root: Node3D
@@ -28,6 +33,12 @@ var repair_segments: Array[MeshInstance3D] = []
 var _body_parts: Array[Dictionary] = []
 var _rig_height := 1.8
 
+## Dynamic cardinal port groups keyed by local/world Vector2i direction.
+var _service_sleeves: Dictionary = {}
+var _service_caps: Dictionary = {}
+var _power_arms: Dictionary = {}
+var _port_leds: Dictionary = {}
+
 var mechanism: Node3D
 var status: MeshInstance3D
 var lamps: Array[MeshInstance3D] = []
@@ -39,6 +50,8 @@ var dark: StandardMaterial3D
 var gold: ShaderMaterial
 var blue: ShaderMaterial
 var accent: StandardMaterial3D
+var power_amber: StandardMaterial3D
+var service_cyan: StandardMaterial3D
 var lit: StandardMaterial3D
 var unlit: StandardMaterial3D
 var warn_lit: StandardMaterial3D
@@ -51,11 +64,14 @@ var _base_roughness: Dictionary = {}
 
 
 func build(kind: String) -> void:
-	set_meta("kind", kind)
+	var canonical := BuildingCatalog.canonical_kind(kind)
+	set_meta("kind", canonical)
 	silver = _material(Color(0.57, 0.61, 0.65), 0.8, 0.32)
 	white = _material(Color(0.86, 0.87, 0.84), 0.15, 0.6)
 	dark = _material(Color(0.055, 0.067, 0.08), 0.5, 0.75)
-	accent = _material(BuildingCatalog.definition(kind)["color"], 0.25, 0.5)
+	accent = _material(BuildingCatalog.definition(canonical)["color"], 0.25, 0.5)
+	power_amber = _material(Color(0.92, 0.66, 0.16), 0.35, 0.42)
+	service_cyan = _material(Color(0.28, 0.76, 0.86), 0.2, 0.4)
 	gold = ShaderMaterial.new()
 	gold.shader = SURFACE_SHADER
 	gold.set_shader_parameter("base_color", Color(0.72, 0.52, 0.22))
@@ -103,29 +119,36 @@ func build(kind: String) -> void:
 	body_root.name = "PrimaryStructure"
 	add_child(body_root)
 
-	_foundation(kind)
-	match kind:
+	_foundation(canonical)
+	match canonical:
+		"support_hub":
+			_support_hub()
+		"tunnel":
+			_connection_tunnel()
+		"power_line":
+			_power_line()
 		"habitat", "lab":
-			_pressure_module(kind)
+			_pressure_module(canonical)
 		"solar":
 			_solar_array()
 		"ice", "oxygen":
-			_processing_module(kind)
+			_processing_module(canonical)
 		"reactor":
 			_reactor()
 		"mine":
 			_refinery()
-		"link":
-			_utility_link()
 		"landing_pad":
 			_landing_pad()
 
-	var status_y := 0.24 if kind == "landing_pad" else 0.46
+	if not (canonical in ["support_hub", "tunnel", "power_line"]):
+		_build_standard_connectors(canonical)
+
+	var status_y := 0.24 if canonical == "landing_pad" else (0.34 if canonical == "power_line" else 0.46)
 	status = _box(self, Vector3(0.24, 0.045, 0.1), Vector3(0, status_y, 1.06),
 		status_material)
 	status.name = "OperatingStatus"
-	if kind != "link":
-		var fixture_at := Vector3(-0.74, 1.52, -0.74) if kind == "landing_pad" else Vector3(0.78, 1.5, 0.85)
+	if not (canonical in ["tunnel", "power_line"]):
+		var fixture_at := Vector3(-0.74, 1.52, -0.74) if canonical == "landing_pad" else Vector3(0.78, 1.5, 0.85)
 		_box(body_root, Vector3(0.13, 0.08, 0.12), fixture_at, dark)
 		_box(body_root, Vector3(0.09, 0.025, 0.08),
 			fixture_at + Vector3(0, -0.045, 0.02), glass)
@@ -138,17 +161,67 @@ func build(kind: String) -> void:
 		body_root.add_child(work_light)
 
 	_collect_body_parts()
-	_build_state_overlays(kind)
+	_build_state_overlays(canonical)
 	build_progress = 1.0
 	condition = ColonySimulation.CONDITION_OPERATIONAL
 	repair_progress = 1.0
 	active = false
+	facing = 0
+	service_mask = 0
+	power_mask = 0
+	_apply_connection_visuals()
 	_apply_visual_state(true)
+
+
+func set_facing(new_facing: int) -> void:
+	var canonical := str(get_meta("kind", ""))
+	var normalized := 0 if (canonical in ["support_hub", "tunnel", "power_line"]) else BuildingCatalog.normalize_facing(new_facing)
+	if facing == normalized:
+		return
+	facing = normalized
+	var deg := float(facing) * 90.0
+	if foundation_root != null:
+		foundation_root.rotation_degrees.y = deg
+	if body_root != null:
+		body_root.rotation_degrees.y = deg
+	_apply_connection_visuals()
+
+
+func set_connections(new_service_mask: int, new_power_mask: int) -> void:
+	if service_mask == new_service_mask and power_mask == new_power_mask:
+		return
+	service_mask = new_service_mask
+	power_mask = new_power_mask
+	_apply_connection_visuals()
+
+
+func _apply_connection_visuals() -> void:
+	var canonical := str(get_meta("kind", ""))
+	var world_aligned := canonical in ["support_hub", "tunnel", "power_line"]
+	for local_dir: Vector2i in _service_sleeves:
+		var world_dir := local_dir if world_aligned else BuildingCatalog.rotate_dir(local_dir, facing)
+		var connected := (service_mask & BuildingCatalog.dir_bit(world_dir)) != 0
+		(_service_sleeves[local_dir] as Node3D).visible = connected
+		if _service_caps.has(local_dir):
+			(_service_caps[local_dir] as Node3D).visible = not connected
+		if _port_leds.has(local_dir):
+			var led: MeshInstance3D = _port_leds[local_dir]
+			led.material_override = lit if (connected and active and _is_operational_visual()) else (service_cyan if connected else unlit)
+	for local_dir: Vector2i in _power_arms:
+		var world_dir := local_dir if world_aligned else BuildingCatalog.rotate_dir(local_dir, facing)
+		var p_connected := (power_mask & BuildingCatalog.dir_bit(world_dir)) != 0
+		var s_connected := (service_mask & BuildingCatalog.dir_bit(world_dir)) != 0
+		if canonical == "support_hub":
+			# Show dedicated HV power tap on open faces wired to a power line.
+			(_power_arms[local_dir] as Node3D).visible = p_connected and not s_connected
+		else:
+			(_power_arms[local_dir] as Node3D).visible = p_connected
 
 
 func set_active(value: bool) -> void:
 	var was_active := active
 	active = value
+	_apply_connection_visuals()
 	_apply_visual_state(not active or not was_active)
 
 
@@ -328,7 +401,7 @@ func advance(delta: float) -> void:
 				mechanism.rotation.y = operating_time * 2.5
 			"oxygen":
 				mechanism.position.y = 1.06 + sin(operating_time * 3.0) * 0.065
-			"habitat", "lab":
+			"habitat", "lab", "support_hub":
 				mechanism.rotation.y = sin(operating_time * 0.35) * 0.65
 			"mine":
 				mechanism.rotation.x = operating_time * 1.8
@@ -393,9 +466,9 @@ func _relative_position(node: Node3D, ancestor: Node3D) -> Vector3:
 
 
 func _build_state_overlays(kind: String) -> void:
-	var compact := kind == "link"
+	var compact := kind == "tunnel"
 	var cage_half := 0.90 if compact else 0.98
-	var cage_h := 0.74 if compact else clampf(_rig_height, 1.55, 2.35)
+	var cage_h := 0.92 if compact else clampf(_rig_height, 1.55, 2.35)
 
 	# 1. Shared construction truss cage + working crane arm + progress strip.
 	construction_rig = Node3D.new()
@@ -460,7 +533,6 @@ func _build_state_overlays(kind: String) -> void:
 	hazard_placard.position = Vector3(0.0, 0.42 if compact else 0.78, 1.03)
 	hazard_placard.rotation_degrees.x = -14.0
 	damage_rig.add_child(hazard_placard)
-	# Dedicated clean high-contrast placard material so ! FAULT pops against dust-darkened hull.
 	var placard_face := _material(Color(0.95, 0.94, 0.90), 0.0, 0.45)
 	placard_face.emission_enabled = true
 	placard_face.emission = Color(0.28, 0.26, 0.22)
@@ -492,7 +564,6 @@ func _build_state_overlays(kind: String) -> void:
 	repair_rig.name = "RepairRig"
 	add_child(repair_rig)
 
-	# Articulated repair arm on front-left pad edge, reaching inward.
 	var arm_base_y := 0.22 if compact else 0.30
 	_cylinder(repair_rig, 0.10, 0.16, Vector3(-0.78, arm_base_y, 0.78), dark)
 	repair_arm = Node3D.new()
@@ -514,7 +585,6 @@ func _build_state_overlays(kind: String) -> void:
 	repair_light.omni_range = 2.2
 	repair_arm.add_child(repair_light)
 
-	# EVA tool rack prop on front-right pad edge.
 	var rack := Node3D.new()
 	rack.name = "EVAToolRack"
 	rack.position = Vector3(0.80, 0.34 if compact else 0.48, 0.78)
@@ -526,7 +596,6 @@ func _build_state_overlays(kind: String) -> void:
 	for tx in [-0.09, 0.0, 0.09]:
 		_cylinder(rack, 0.026, 0.24, Vector3(tx, 0.0, 0.02), white if tx != 0.0 else accent)
 
-	# Progress segment strip on +Z front.
 	var rep_bar_y := 0.36 if compact else 0.62
 	_box(repair_rig, Vector3(0.76, 0.14, 0.055), Vector3(0, rep_bar_y, 1.03), dark)
 	for i in range(5):
@@ -593,24 +662,34 @@ func _label_on(parent: Node3D, text: String, at: Vector3, size: int,
 	parent.add_child(label)
 
 
+func _dir_yaw(direction: Vector2i) -> float:
+	if direction == BuildingCatalog.DIR_E:
+		return PI * 0.5
+	if direction == BuildingCatalog.DIR_N:
+		return PI
+	if direction == BuildingCatalog.DIR_W:
+		return -PI * 0.5
+	return 0.0
+
+
 func _foundation(kind: String) -> void:
-	if kind == "link":
-		for direction in ColonySimulation.NEIGHBORS:
-			var end := Vector3(direction.x, 0, direction.y) * 1.12
-			for fraction in [0.35, 0.65, 0.88]:
-				_box(foundation_root, Vector3(0.32, 0.05, 0.32),
-					end * fraction + Vector3(0, 0.15, 0), dark)
+	if kind == "power_line":
+		# Slender twin-foot portal base that straddles a Connection Tunnel cleanly when crossing.
+		for x in [-0.78, 0.78]:
+			_box(foundation_root, Vector3(0.28, 0.08, 0.44), Vector3(x, 0.04, 0), dark)
+			_cylinder(foundation_root, 0.09, 0.06, Vector3(x, 0.09, 0), silver)
+		return
+	if kind == "tunnel":
+		_box(foundation_root, Vector3(1.06, 0.11, 1.06), Vector3(0, 0.08, 0), dark)
+		for x in [-0.42, 0.42]:
+			for z in [-0.42, 0.42]:
+				_cylinder(foundation_root, 0.10, 0.06, Vector3(x, 0.03, z), silver)
 		return
 	if kind == "landing_pad":
 		_box(foundation_root, Vector3(2.18, 0.12, 2.18), Vector3(0, 0.08, 0), dark)
 		for x in [-0.90, 0.90]:
 			for z in [-0.90, 0.90]:
 				_cylinder(foundation_root, 0.16, 0.07, Vector3(x, 0.035, z), silver)
-		for direction in ColonySimulation.NEIGHBORS:
-			var at := Vector3(direction.x, 0, direction.y)
-			var socket := _box(foundation_root, Vector3(0.3, 0.12, 0.14),
-				at * 1.07 + Vector3(0, 0.16, 0), gold)
-			socket.rotation.y = PI * 0.5 if direction.x != 0 else 0.0
 		return
 	_box(foundation_root, Vector3(2.18, 0.13, 2.18), Vector3(0, 0.1, 0), dark)
 	for x in [-0.88, 0.88]:
@@ -622,12 +701,183 @@ func _foundation(kind: String) -> void:
 	for z in [-0.88, 0.88]:
 		_box(foundation_root, Vector3(1.85, 0.16, 0.1), Vector3(0, 0.28, z), silver)
 		_strut(foundation_root, Vector3(-0.85, 0.2, z), Vector3(0.85, 0.46, z), 0.025, silver)
-	# Four matching sockets reach the cell edge without widening the build footprint.
-	for direction in ColonySimulation.NEIGHBORS:
-		var at := Vector3(direction.x, 0, direction.y)
-		var socket := _box(foundation_root, Vector3(0.3, 0.18, 0.16),
-			at * 1.07 + Vector3(0, 0.32, 0), gold)
-		socket.rotation.y = PI * 0.5 if direction.x != 0 else 0.0
+
+
+## Standardized Service Connector collars (centerline, ±1.14) and HV Power Connector lugs on standard modules.
+func _build_standard_connectors(kind: String) -> void:
+	var data := BuildingCatalog.definition(kind)
+	var service_ports: Array = data.get("service_ports", [])
+	var power_ports: Array = data.get("power_ports", [])
+	var low_pad := kind == "landing_pad"
+	var s_y := 0.34 if low_pad else SERVICE_PORT_Y
+	var s_h := 0.24 if low_pad else 0.54
+	var s_w := 0.56 if low_pad else 0.62
+
+	for dir: Vector2i in service_ports:
+		var yaw := _dir_yaw(dir)
+		# Mated docking sleeve extending flush to cell boundary (±1.145).
+		var sleeve := Node3D.new()
+		sleeve.name = "ServiceSleeve_%d_%d" % [dir.x, dir.y]
+		sleeve.rotation.y = yaw
+		body_root.add_child(sleeve)
+		_box(sleeve, Vector3(s_w, s_h, 0.22), Vector3(0, s_y, 1.035), white)
+		_box(sleeve, Vector3(s_w + 0.06, s_h + 0.05, 0.045), Vector3(0, s_y, 1.12), silver)
+		_box(sleeve, Vector3(s_w * 0.72, 0.055, 0.20), Vector3(0, s_y + s_h * 0.5 + 0.02, 1.03), gold)
+		_box(sleeve, Vector3(0.16, 0.08, 0.16), Vector3(0.42, POWER_PORT_Y, 1.06), power_amber)
+		var led := _box(sleeve, Vector3(0.16, 0.032, 0.03), Vector3(0, s_y + s_h * 0.5 + 0.065, 1.09), service_cyan)
+		_service_sleeves[dir] = sleeve
+		_port_leds[dir] = led
+
+		# Unmated sealed bulkhead collar sitting cleanly inside the module rim.
+		var cap := Node3D.new()
+		cap.name = "ServiceCap_%d_%d" % [dir.x, dir.y]
+		cap.rotation.y = yaw
+		body_root.add_child(cap)
+		_box(cap, Vector3(s_w + 0.04, s_h + 0.04, 0.08), Vector3(0, s_y, 1.04), silver)
+		_box(cap, Vector3(s_w - 0.08, s_h - 0.08, 0.09), Vector3(0, s_y, 1.055), dark)
+		_box(cap, Vector3(0.26, 0.032, 0.03), Vector3(0, s_y + s_h * 0.5 + 0.035, 1.06), service_cyan)
+		_service_caps[dir] = cap
+
+	# Standardized HV Power Connector receptacles on every declared power face.
+	for dir: Vector2i in power_ports:
+		var yaw := _dir_yaw(dir)
+		var base_x := 0.44 if (dir in service_ports) else 0.0
+		var plug := Node3D.new()
+		plug.name = "PowerSocket_%d_%d" % [dir.x, dir.y]
+		plug.rotation.y = yaw
+		foundation_root.add_child(plug)
+		_box(plug, Vector3(0.24, 0.16, 0.12), Vector3(base_x, POWER_PORT_Y, 1.05), dark)
+		_box(plug, Vector3(0.18, 0.09, 0.08), Vector3(base_x, POWER_PORT_Y + 0.01, 1.09), power_amber)
+
+		if not (dir in service_ports):
+			var arm := Node3D.new()
+			arm.name = "PowerTap_%d_%d" % [dir.x, dir.y]
+			arm.rotation.y = yaw
+			body_root.add_child(arm)
+			_box(arm, Vector3(0.14, 0.09, 0.10), Vector3(0, POWER_PORT_Y, 1.095), power_amber)
+			_strut(arm, Vector3(0, POWER_PORT_Y + 0.06, 1.06), Vector3(0, 1.12, 1.06), 0.025, silver)
+			_box(arm, Vector3(0.20, 0.06, 0.10), Vector3(0, 1.14, 1.08), power_amber)
+			_power_arms[dir] = arm
+
+
+## 4-Way Adapter / Support Hub: octagonal pressurized core with 4 dynamic N/E/S/W docking sleeves.
+func _support_hub() -> void:
+	_cylinder(body_root, 0.62, 1.18, Vector3(0, 0.96, 0), white)
+	for y in [0.46, 0.96, 1.48]:
+		_cylinder(body_root, 0.65, 0.06, Vector3(0, y, 0), silver)
+	_cylinder(body_root, 0.56, 0.18, Vector3(0, 1.62, 0), gold, 0.86)
+	# Overhead observation cupola brings hub height to ~2.05m (>= 1.7m readability rule).
+	_cylinder(body_root, 0.34, 0.24, Vector3(0, 1.80, 0), silver)
+	var cupola := _cylinder(body_root, 0.28, 0.14, Vector3(0, 1.84, 0), glass)
+	windows.append(cupola)
+	_cylinder(body_root, 0.24, 0.08, Vector3(0, 1.94, 0), white, 0.7)
+	mechanism = Node3D.new()
+	mechanism.name = "HubCommsScanner"
+	mechanism.position = Vector3(0, 2.02, 0)
+	body_root.add_child(mechanism)
+	_cylinder(mechanism, 0.04, 0.14, Vector3(0, 0.05, 0), silver)
+	_dish(mechanism, 0.20)
+	_label("SELENE\nNODE-04", Vector3(0, 1.38, 0.65), 22)
+	_lamp_strip(Vector3(-0.18, 1.56, 0.58), 4, Vector3(0.12, 0, 0))
+
+	for dir in BuildingCatalog.ALL_DIRS:
+		var yaw := _dir_yaw(dir)
+		# Extended pressurized docking sleeve + lower utility/power umbilicals.
+		var sleeve := Node3D.new()
+		sleeve.name = "HubSleeve_%d_%d" % [dir.x, dir.y]
+		sleeve.rotation.y = yaw
+		body_root.add_child(sleeve)
+		_box(sleeve, Vector3(0.62, 0.54, 0.56), Vector3(0, SERVICE_PORT_Y, 0.86), white)
+		_box(sleeve, Vector3(0.66, 0.58, 0.06), Vector3(0, SERVICE_PORT_Y, 1.115), silver)
+		_box(sleeve, Vector3(0.56, 0.08, 0.48), Vector3(0, SERVICE_PORT_Y + 0.30, 0.84), gold)
+		for ox in [-0.22, 0.22]:
+			_strut(sleeve, Vector3(ox, 0.34, 0.55), Vector3(ox, 0.34, 1.13), 0.032, silver if ox < 0 else power_amber)
+		var led := _box(sleeve, Vector3(0.20, 0.036, 0.04), Vector3(0, SERVICE_PORT_Y + 0.36, 1.07), service_cyan)
+		_service_sleeves[dir] = sleeve
+		_port_leds[dir] = led
+
+		# Sealed bulkhead hatch when port is unconnected.
+		var cap := Node3D.new()
+		cap.name = "HubCap_%d_%d" % [dir.x, dir.y]
+		cap.rotation.y = yaw
+		body_root.add_child(cap)
+		var ring := _cylinder(cap, 0.32, 0.12, Vector3(0, SERVICE_PORT_Y, 0.62), silver)
+		ring.rotation_degrees.x = 90
+		var door := _cylinder(cap, 0.26, 0.14, Vector3(0, SERVICE_PORT_Y, 0.64), dark)
+		door.rotation_degrees.x = 90
+		_box(cap, Vector3(0.18, 0.05, 0.04), Vector3(0, SERVICE_PORT_Y, 0.72), service_cyan)
+		_service_caps[dir] = cap
+
+		# HV power tap shown if a Power Line plugs into an otherwise-unmated face.
+		var p_arm := Node3D.new()
+		p_arm.name = "HubPowerTap_%d_%d" % [dir.x, dir.y]
+		p_arm.rotation.y = yaw
+		body_root.add_child(p_arm)
+		_box(p_arm, Vector3(0.22, 0.16, 0.48), Vector3(0, POWER_PORT_Y, 0.88), dark)
+		_box(p_arm, Vector3(0.16, 0.09, 0.52), Vector3(0, POWER_PORT_Y + 0.02, 0.88), power_amber)
+		_power_arms[dir] = p_arm
+
+
+## 16-state auto-meshing pressurized Connection Tunnel (humans, water, O2, heat + power bus).
+func _connection_tunnel() -> void:
+	# Central octagonal corridor junction (height ~1.16m, clears overhead power_line crossings).
+	_box(body_root, Vector3(0.76, 0.62, 0.76), Vector3(0, SERVICE_PORT_Y, 0), white)
+	_box(body_root, Vector3(0.80, 0.08, 0.80), Vector3(0, SERVICE_PORT_Y + 0.33, 0), gold)
+	_box(body_root, Vector3(0.82, 0.12, 0.82), Vector3(0, 0.40, 0), silver)
+	_lamp_strip(Vector3(-0.12, SERVICE_PORT_Y + 0.39, 0.18), 3, Vector3(0.12, 0, 0))
+
+	for dir in BuildingCatalog.ALL_DIRS:
+		var yaw := _dir_yaw(dir)
+		var arm := Node3D.new()
+		arm.name = "TunnelArm_%d_%d" % [dir.x, dir.y]
+		arm.rotation.y = yaw
+		body_root.add_child(arm)
+		_box(arm, Vector3(0.64, 0.54, 0.78), Vector3(0, SERVICE_PORT_Y, 0.755), white)
+		_box(arm, Vector3(0.68, 0.58, 0.055), Vector3(0, SERVICE_PORT_Y, 1.118), silver)
+		_box(arm, Vector3(0.56, 0.07, 0.74), Vector3(0, SERVICE_PORT_Y + 0.30, 0.75), gold)
+		_box(arm, Vector3(0.76, 0.10, 0.78), Vector3(0, 0.36, 0.755), dark)
+		# Lower integrated HV bus & coolant conduit along corridor underside.
+		_strut(arm, Vector3(-0.26, 0.28, 0.36), Vector3(-0.26, 0.28, 1.135), 0.032, silver)
+		_strut(arm, Vector3(0.26, 0.28, 0.36), Vector3(0.26, 0.28, 1.135), 0.032, power_amber)
+		var led := _box(arm, Vector3(0.16, 0.03, 0.035), Vector3(0, SERVICE_PORT_Y + 0.35, 1.07), service_cyan)
+		_service_sleeves[dir] = arm
+		_port_leds[dir] = led
+
+		var cap := Node3D.new()
+		cap.name = "TunnelCap_%d_%d" % [dir.x, dir.y]
+		cap.rotation.y = yaw
+		body_root.add_child(cap)
+		_box(cap, Vector3(0.52, 0.44, 0.06), Vector3(0, SERVICE_PORT_Y, 0.40), silver)
+		_box(cap, Vector3(0.38, 0.32, 0.07), Vector3(0, SERVICE_PORT_Y, 0.415), dark)
+		_service_caps[dir] = cap
+
+
+## 16-state auto-meshing elevated HV Power Line gantry pylon (crosses cleanly over tunnels).
+func _power_line() -> void:
+	# Twin outer truss legs at x = ±0.78 clear a 0.76m-wide tunnel passing underneath!
+	for x in [-0.78, 0.78]:
+		_cylinder(body_root, 0.042, 1.54, Vector3(x, 0.85, 0), silver)
+		_strut(body_root, Vector3(x, 0.18, -0.18), Vector3(x * 0.82, 1.56, 0), 0.022, silver)
+		_strut(body_root, Vector3(x, 0.18, 0.18), Vector3(x * 0.82, 1.56, 0), 0.022, silver)
+	# Overhead HV cross-arm at y = 1.60m with ceramic amber insulators.
+	_box(body_root, Vector3(1.66, 0.08, 0.14), Vector3(0, 1.60, 0), dark)
+	_box(body_root, Vector3(1.56, 0.05, 0.08), Vector3(0, 1.65, 0), silver)
+	for ox in [-0.46, 0.0, 0.46]:
+		_cylinder(body_root, 0.065, 0.14, Vector3(ox, 1.69, 0), power_amber)
+	_lamp_strip(Vector3(-0.12, 1.60, 0.09), 3, Vector3(0.12, 0, 0))
+
+	for dir in BuildingCatalog.ALL_DIRS:
+		var yaw := _dir_yaw(dir)
+		var span := Node3D.new()
+		span.name = "PowerSpan_%d_%d" % [dir.x, dir.y]
+		span.rotation.y = yaw
+		body_root.add_child(span)
+		# Twin taut insulated HV conductors running from overhead insulators to cell boundary (±1.145).
+		for ox in [-0.28, 0.28]:
+			_strut(span, Vector3(ox, 1.68, 0.0), Vector3(ox, 1.68, 1.14), 0.024, power_amber)
+			_strut(span, Vector3(ox, 1.63, 0.0), Vector3(ox, 1.63, 1.14), 0.018, dark)
+		_box(span, Vector3(0.62, 0.04, 0.05), Vector3(0, 1.66, 1.11), silver)
+		_power_arms[dir] = span
 
 
 func _pressure_module(kind: String) -> void:
@@ -876,17 +1126,6 @@ func _landing_pad() -> void:
 	_box(body_root, Vector3(0.34, 0.05, 0.30), Vector3(0.60, 0.24, 0.46), silver)
 	_box(body_root, Vector3(0.58, 0.14, 0.05), Vector3(0.0, 0.33, 0.96), white)
 	_label("SELENE / PAD-01", Vector3(0.0, 0.34, 1.00), 19)
-
-
-func _utility_link() -> void:
-	for direction in ColonySimulation.NEIGHBORS:
-		var end := Vector3(direction.x, 0, direction.y) * 1.12
-		for offset in [-0.13, 0.13]:
-			var side: Vector3 = Vector3(-direction.y, 0, direction.x) * offset
-			_strut(body_root, side + Vector3(0, 0.23, 0), end + side + Vector3(0, 0.23, 0),
-				0.045, silver if offset < 0 else accent)
-	_box(body_root, Vector3(0.48, 0.25, 0.48), Vector3(0, 0.3, 0), gold)
-	_lamp_strip(Vector3(-0.12, 0.45, 0.12), 3, Vector3(0.12, 0, 0))
 
 
 func _lamp_strip(at: Vector3, count: int, step: Vector3) -> void:

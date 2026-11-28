@@ -75,30 +75,20 @@ Commit script `.gd.uid` sidecars; ignore `.godot/` and generated build outputs.
 - Signals communicate changed state and explicit notifications. The HUD does
   not independently calculate production or alter authoritative state.
 
-## Shared utility network: first playable
+## Standardized Power and Service networks (Phase 1A)
 
-Each occupied tile, including a utility link, is a node. Orthogonal adjacency
-creates an edge. Diagonal placement does not connect. Discover components using
-a visited set and queue; rebuild after construction or demolition.
+Every building declares local `service_ports` and `power_ports` in `BuildingCatalog`, rotated by its integer `facing` (`0..3` in 90° steps around `+Y`). Two orthogonally adjacent cells connect only when matching ports face each other. Diagonal placement never connects.
 
-For each component:
+`ColonySimulation.recalculate()` evaluates two deterministic snapshot-based graphs:
 
-1. Sum available power, accounting for the artificial day/night cycle.
-2. Sum power demand. If overloaded, shut powered consumers down together.
-3. Evaluate powered ice extraction, then compare water supply with demand.
-4. Evaluate powered, watered life support; reactors independently produce heat.
-5. Check habitat oxygen, water, heat, and power requirements.
-6. Mark module status and identify shortages for inspection and HUD warnings.
-7. Permit lab/refinery production only when powered and a nonempty crew is safe.
+1. **Power networks (`power_networks`):** traverse mated `power_ports` (including power pass-through across mated Service Connectors) and elevated `power_lines` tiles (which can coexist on top of `tunnel` tiles as crossings). Sum operational power supply (accounting for lunar night) against power demand; overloaded electrical components shut consumers down together.
+2. **Service networks (`service_networks`):** traverse strictly mated `service_ports`, `tunnel` corridors, and `support_hub` 4-way adapters (`power_lines` never carry Service). Within each service component:
+   - Evaluate powered ice extraction, then compare water supply with demand.
+   - Evaluate powered, watered life support; reactors in the service component also contribute heat.
+   - Check habitat power, water, oxygen, and heat requirements to compute local `safe_crew`.
+   - Permit crew-requiring production (`lab`, `mine`) only when powered AND sharing a service corridor with safe crew.
 
-Evaluate from a snapshot rather than dictionary iteration order. Disconnected
-components cannot share supply, even if total colony production exceeds total
-demand. Colony-wide totals are informational only; display component deficits
-so healthy totals cannot mask an isolated habitat.
-
-The first version has no tanks, batteries, pressure, transport capacity, or
-separate network layers. The network upgrade issue introduces those features
-with explicit priorities, storage accounting, and failure cascades.
+Disconnected components cannot share supply, even when colony-wide totals show a surplus. Storage tanks, batteries, line capacities, and load-priority shedding build on these two graphs in `#6`.
 
 ## Construction and camera
 

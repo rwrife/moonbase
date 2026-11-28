@@ -18,13 +18,25 @@ var cell_rocks: Dictionary = {}
 var hidden_rocks: Dictionary = {}
 var boulders: Array[MeshInstance3D] = []
 var models: Dictionary = {}
+var power_line_models: Dictionary = {}
 var landers: Dictionary = {}
 var indicators: Dictionary = {}
 var preview: MeshInstance3D
+var preview_root: Node3D
+var preview_ghost: LunarModule
+var preview_ghost_kind := ""
+var preview_ports_root: Node3D
+var path_preview_root: Node3D
 var sun: DirectionalLight3D
 var good_material: StandardMaterial3D
 var bad_material: StandardMaterial3D
 var neutral_material: StandardMaterial3D
+var ghost_good_material: StandardMaterial3D
+var ghost_bad_material: StandardMaterial3D
+var port_service_open_mat: StandardMaterial3D
+var port_service_mated_mat: StandardMaterial3D
+var port_power_open_mat: StandardMaterial3D
+var port_power_mated_mat: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -34,6 +46,17 @@ func _ready() -> void:
 	for material in [good_material, bad_material]:
 		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		material.albedo_color.a = 0.42
+	ghost_good_material = _material(Color(0.32, 0.92, 0.78), true)
+	ghost_good_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_good_material.albedo_color.a = 0.36
+	ghost_bad_material = _material(Color(1.0, 0.32, 0.24), true)
+	ghost_bad_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_bad_material.albedo_color.a = 0.36
+	port_service_open_mat = _material(Color(0.28, 0.84, 0.96), true)
+	port_service_mated_mat = _material(Color(0.22, 1.0, 0.56), true)
+	port_power_open_mat = _material(Color(0.96, 0.72, 0.18), true)
+	port_power_mated_mat = _material(Color(0.75, 1.0, 0.25), true)
+
 	var environment := WorldEnvironment.new()
 	var settings := Environment.new()
 	settings.background_mode = Environment.BG_COLOR
@@ -69,6 +92,17 @@ func _ready() -> void:
 		Vector3.ZERO, good_material)
 	preview.visible = false
 	preview.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	preview_root = Node3D.new()
+	preview_root.name = "PreviewGhostRoot"
+	preview_root.visible = false
+	add_child(preview_root)
+	preview_ports_root = Node3D.new()
+	preview_ports_root.name = "PreviewPorts"
+	preview_root.add_child(preview_ports_root)
+	path_preview_root = Node3D.new()
+	path_preview_root.name = "PathPreviewRoot"
+	path_preview_root.visible = false
+	add_child(path_preview_root)
 
 
 static func cell_position(cell: Vector2i) -> Vector3:
@@ -366,6 +400,10 @@ func synchronize(simulation: ColonySimulation) -> void:
 			models[cell].queue_free()
 			models.erase(cell)
 			indicators.erase(cell)
+	for cell: Vector2i in power_line_models.keys():
+		if not simulation.power_lines.has(cell):
+			power_line_models[cell].queue_free()
+			power_line_models.erase(cell)
 	for cell: Vector2i in landers.keys():
 		if not simulation.buildings.has(cell) or simulation.buildings[cell]["kind"] != "landing_pad":
 			landers[cell].queue_free()
@@ -380,6 +418,11 @@ func synchronize(simulation: ColonySimulation) -> void:
 			_create_module(cell, building["kind"])
 		var model: LunarModule = models[cell]
 		model.position = surface_position(cell)
+		model.set_facing(int(building.get("facing", 0)))
+		model.set_connections(
+			int(building.get("service_mask", 0)),
+			int(building.get("power_mask", 0))
+		)
 		model.set_build_progress(float(building.get("build_progress", 1.0)))
 		model.set_condition(
 			str(building.get("condition", ColonySimulation.CONDITION_OPERATIONAL)),
@@ -390,15 +433,128 @@ func synchronize(simulation: ColonySimulation) -> void:
 			if not landers.has(cell):
 				_create_lander(cell)
 			landers[cell].position = surface_position(cell)
+	for cell: Vector2i in simulation.power_lines:
+		var pl: Dictionary = simulation.power_lines[cell]
+		if not power_line_models.has(cell):
+			_create_power_line(cell)
+		var pl_model: LunarModule = power_line_models[cell]
+		pl_model.position = surface_position(cell)
+		pl_model.set_connections(0, int(pl.get("power_mask", 0)))
+		pl_model.set_active(bool(pl.get("active", false)))
 	sync_landers(simulation)
 	sun.light_energy = 0.22 if simulation.is_night() else DAY_ENERGY
 	sun.light_color = Color(0.55, 0.66, 1.0) if simulation.is_night() else DAY_COLOR
+
+
+func hide_previews() -> void:
+	preview.visible = false
+	preview_root.visible = false
+	path_preview_root.visible = false
 
 
 func show_preview(cell: Vector2i, valid: bool, enabled: bool) -> void:
 	preview.visible = enabled
 	preview.position = surface_position(cell) + Vector3(0, 0.06, 0)
 	preview.material_override = good_material if valid else bad_material
+	preview_root.visible = false
+	path_preview_root.visible = false
+
+
+## Renders a translucent 3D module ghost with Cyan Service Port arrows and Amber Power Port indicators.
+func show_module_preview(kind: String, cell: Vector2i, facing: int, valid: bool,
+		enabled: bool, connection_masks: Dictionary = {}) -> void:
+	preview.visible = enabled
+	preview.position = surface_position(cell) + Vector3(0, 0.06, 0)
+	preview.material_override = good_material if valid else bad_material
+	path_preview_root.visible = false
+	if not enabled or not BuildingCatalog.has_kind(kind):
+		preview_root.visible = false
+		return
+	var canonical := BuildingCatalog.canonical_kind(kind)
+	if preview_ghost_kind != canonical or preview_ghost == null:
+		if preview_ghost != null:
+			preview_ghost.queue_free()
+		preview_ghost = LunarModule.new()
+		preview_ghost.build(canonical)
+		preview_root.add_child(preview_ghost)
+		preview_ghost_kind = canonical
+	preview_root.visible = true
+	preview_root.position = surface_position(cell)
+	preview_ghost.set_facing(facing)
+	var s_mask := int(connection_masks.get("service", 0))
+	var p_mask := int(connection_masks.get("power", 0))
+	preview_ghost.set_connections(s_mask, p_mask)
+	_tint_ghost_subtree(preview_ghost, ghost_good_material if valid else ghost_bad_material)
+	_rebuild_preview_port_markers(canonical, facing, s_mask, p_mask)
+
+
+func show_line_preview(kind: String, path: Array[Vector2i], simulation: ColonySimulation) -> void:
+	preview.visible = false
+	preview_root.visible = false
+	for child in path_preview_root.get_children():
+		child.queue_free()
+	if path.is_empty():
+		path_preview_root.visible = false
+		return
+	path_preview_root.visible = true
+	var canonical := BuildingCatalog.canonical_kind(kind)
+	var unit_cost := float(BuildingCatalog.definition(canonical)["cost"])
+	var running_cost := 0.0
+	for cell in path:
+		var already: bool = (
+			(canonical == "power_line" and simulation.power_lines.has(cell))
+			or (canonical == "tunnel" and simulation.buildings.has(cell) and str(simulation.buildings[cell]["kind"]) == "tunnel")
+		)
+		var valid := true
+		if not already:
+			var err := simulation.placement_error(canonical, cell)
+			running_cost += unit_cost
+			valid = err.is_empty() and simulation.credits >= running_cost
+		var pad := _box(path_preview_root, Vector3(CELL_SIZE * 0.90, 0.08, CELL_SIZE * 0.90),
+			surface_position(cell) + Vector3(0, 0.07, 0),
+			neutral_material if already else (good_material if valid else bad_material))
+		pad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var marker_y := 1.62 if canonical == "power_line" else 0.78
+		var marker := _box(path_preview_root,
+			Vector3(0.42, 0.16, 0.42) if canonical == "power_line" else Vector3(0.68, 0.56, 0.68),
+			surface_position(cell) + Vector3(0, marker_y, 0),
+			port_power_open_mat if canonical == "power_line" else (port_service_mated_mat if valid else bad_material))
+		marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func _tint_ghost_subtree(node: Node, material: Material) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		mi.material_override = material
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	elif node is OmniLight3D:
+		(node as OmniLight3D).visible = false
+	for child in node.get_children():
+		_tint_ghost_subtree(child, material)
+
+
+func _rebuild_preview_port_markers(canonical: String, facing: int, s_mask: int, p_mask: int) -> void:
+	for child in preview_ports_root.get_children():
+		child.queue_free()
+	var s_ports := BuildingCatalog.world_service_ports(canonical, facing)
+	var p_ports := BuildingCatalog.world_power_ports(canonical, facing)
+	for dir in s_ports:
+		var mated := (s_mask & BuildingCatalog.dir_bit(dir)) != 0
+		var mat := port_service_mated_mat if mated else port_service_open_mat
+		var base := Vector3(dir.x, 0, dir.y) * 1.12 + Vector3(0, LunarModule.SERVICE_PORT_Y, 0)
+		var bar := _box(preview_ports_root,
+			Vector3(0.46 if dir.y != 0 else 0.14, 0.14, 0.14 if dir.y != 0 else 0.46),
+			base, mat)
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for dir in p_ports:
+		if dir in s_ports and canonical != "power_line":
+			continue
+		var mated := (p_mask & BuildingCatalog.dir_bit(dir)) != 0
+		var mat := port_power_mated_mat if mated else port_power_open_mat
+		var y := 1.64 if canonical == "power_line" else LunarModule.POWER_PORT_Y
+		var lug := _box(preview_ports_root, Vector3(0.22, 0.16, 0.22),
+			Vector3(dir.x, 0, dir.y) * 1.10 + Vector3(0, y, 0), mat)
+		lug.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _create_module(cell: Vector2i, kind: String) -> void:
@@ -408,6 +564,14 @@ func _create_module(cell: Vector2i, kind: String) -> void:
 	add_child(model)
 	models[cell] = model
 	indicators[cell] = model.status
+
+
+func _create_power_line(cell: Vector2i) -> void:
+	var model := LunarModule.new()
+	model.build("power_line")
+	model.position = surface_position(cell)
+	add_child(model)
+	power_line_models[cell] = model
 
 
 func _create_lander(cell: Vector2i) -> void:
@@ -425,5 +589,7 @@ func sync_landers(simulation: ColonySimulation) -> void:
 func advance_modules(delta: float, simulation: ColonySimulation = null) -> void:
 	for model: LunarModule in models.values():
 		model.advance(delta)
+	for pl_model: LunarModule in power_line_models.values():
+		pl_model.advance(delta)
 	if simulation != null:
 		sync_landers(simulation)

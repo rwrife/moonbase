@@ -45,9 +45,11 @@ func run() -> void:
 		camera.camera.size = 13
 		camera.position = Vector3(-10, 0, 12)
 		await shoot(game, out + "/closeup_rough.png")
-		game.simulation.place("reactor", Vector2i(0, 1))
-		game.simulation.place("lab", Vector2i(1, 1))
-		game.simulation.place("mine", Vector2i(1, 0))
+		game.simulation.place("reactor", Vector2i(0, -1))
+		game.simulation.place("lab", Vector2i(1, 0))
+		game.simulation.place("mine", Vector2i(2, 0))
+		game.simulation.place("tunnel", Vector2i(1, 1))
+		game.simulation.place_line_path("power_line", [Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1)])
 		for cell in [Vector2i(2, -1), Vector2i(3, -1), Vector2i(2, -2), Vector2i(3, -2)]:
 			game.simulation.bulldoze(cell)
 		camera.position = Vector3(1.5, 0, -0.5)

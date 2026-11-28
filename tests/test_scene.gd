@@ -35,38 +35,41 @@ func run() -> void:
 	root.add_child(game)
 	game.set_process(false)
 	await process_frame
-	check(game.site.models.size() == 5, "Scene must display starter modules including landing pad")
+	check(game.site.models.size() == 6, "Scene must display starter modules including 4-Way adapter and landing pad")
 	check_module_visuals(game)
+	check_connectors_and_power_lines_visuals(game)
 	check_structure_states(game)
 	await check_landing_pad_and_supply_ships(game)
 	check(game.camera_rig.camera.projection == Camera3D.PROJECTION_ORTHOGONAL,
 		"Gameplay camera must be orthographic")
 	for entry in [
 		["pan_left", KEY_LEFT], ["pan_right", KEY_RIGHT],
-		["pan_up", KEY_UP], ["pan_down", KEY_DOWN]
+		["pan_up", KEY_UP], ["pan_down", KEY_DOWN],
+		["rotate_cw", KEY_R]
 	]:
 		var events := InputMap.action_get_events(entry[0])
-		check(events[1].physical_keycode == entry[1], "Arrow key mapping must match " + entry[0])
+		var idx := 0 if entry[0] == "rotate_cw" else 1
+		check(events[idx].physical_keycode == entry[1], "Key mapping must match " + entry[0])
 	var button: Button = game.hud.tool_buttons["reactor"]
 	await click(button.get_global_rect().get_center())
 	check(game.tool == "reactor", "HUD must select construction mode")
-	check(game.simulation.buildings.size() == 5, "UI clicks must not place world modules")
+	check(game.simulation.buildings.size() == 6, "UI clicks must not place world modules")
 	var build_screen := game.camera_rig.camera.unproject_position(
-		game.site.surface_position(Vector2i(0, 1)))
+		game.site.surface_position(Vector2i(0, -1)))
 	await click(build_screen)
-	check(game.site.models.size() == 6, "Construction must synchronize world visuals")
+	check(game.site.models.size() == 7, "Construction must synchronize world visuals")
 	var credits: float = game.simulation.credits
 	await click(build_screen)
-	check(game.simulation.credits == credits and game.site.models.size() == 6,
+	check(game.simulation.credits == credits and game.site.models.size() == 7,
 		"Clicking an occupied cell must not charge or add a duplicate visual")
 	check(game.hud.event_log.text == "This tile is occupied.", "World rejection must reach HUD")
 	game.select_tool("")
-	game.activate_cell(Vector2i(0, 1))
+	game.activate_cell(Vector2i(0, -1))
 	check("Fission reactor" in game.hud.inspector.text, "Selection must inspect local module")
 	game.select_tool("demolish")
-	game.activate_cell(Vector2i(0, 1))
+	game.activate_cell(Vector2i(0, -1))
 	await process_frame
-	check(game.site.models.size() == 5, "Demolition must remove visual module")
+	check(game.site.models.size() == 6, "Demolition must remove visual module")
 	var pad := Vector2i(4, -4)
 	var rough := game.site.terrain.pad_targets.has(pad)
 	var hidden_before := _visible_rocks(game.site, pad)
@@ -108,12 +111,12 @@ func run() -> void:
 		"Restart must restore undisturbed regolith and rocks")
 	check(game.simulation.day == 1 and game.speed == 1 and not game.paused,
 		"Restart must clear clock, pause, speed and scenario")
-	game.simulation.demolish(Vector2i(0, 0))
-	game.simulation.place("reactor", Vector2i(0, 0))
+	game.simulation.demolish(Vector2i(0, 1))
+	game.simulation.place("reactor", Vector2i(0, 1))
 	game.restart()
-	check(game.site.models[Vector2i(0, 0)].get_meta("kind") == "solar",
+	check(game.site.models[Vector2i(0, 1)].get_meta("kind") == "solar",
 		"Restart must replace visuals when a starter module changed type")
-	check(game.site.models[Vector2i(0, 0)].operating_time == 0.0,
+	check(game.site.models[Vector2i(0, 1)].operating_time == 0.0,
 		"Replacement starter modules must begin with a fresh animation clock")
 	var cell := Vector2i(-3, 2)
 	var screen: Vector2 = game.camera_rig.camera.unproject_position(game.site.surface_position(cell))
@@ -133,12 +136,12 @@ func run() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--capture" in args and DisplayServer.get_name() != "headless":
 		game.restart()
-		game.simulation.place("reactor", Vector2i(0, 1))
-		game.simulation.place("lab", Vector2i(1, 1))
-		game.simulation.place("mine", Vector2i(1, 0))
+		game.simulation.place("reactor", Vector2i(0, -1))
+		game.simulation.place("lab", Vector2i(1, 0))
+		game.simulation.place("mine", Vector2i(2, 0))
 		game.camera_rig.camera.size = 27
 		game.camera_rig.rotation_degrees.y = 45
-		game.selected = Vector2i(0, 1)
+		game.selected = Vector2i(0, 0)
 		game.refresh()
 		await process_frame
 		await RenderingServer.frame_post_draw
@@ -147,7 +150,7 @@ func run() -> void:
 	game.queue_free()
 	await process_frame
 	if failures == 0:
-		print("PASS: scene, HUD, construction, clock, restart, states, supply landings and camera integration")
+		print("PASS: scene, HUD, connectors, power lines, construction, clock, restart, states, supply landings and camera integration")
 	quit(1 if failures else 0)
 
 
@@ -160,8 +163,59 @@ func _visible_rocks(site: LunarSite, cell: Vector2i) -> int:
 	return count
 
 
+func check_connectors_and_power_lines_visuals(game: ColonyGame) -> void:
+	# Starter 4-Way adapter at (0,0) has West & South sleeves extended, East & North capped.
+	var hub: LunarModule = game.site.models[Vector2i(0, 0)]
+	check(hub._service_sleeves[BuildingCatalog.DIR_W].visible and hub._service_sleeves[BuildingCatalog.DIR_S].visible,
+		"4-Way adapter must extend sleeves toward connected West and South modules")
+	check(not hub._service_sleeves[BuildingCatalog.DIR_E].visible and hub._service_caps[BuildingCatalog.DIR_E].visible,
+		"4-Way adapter must seal unconnected East bulkhead")
+
+	# Connecting a Lab on East dynamically extends the East docking sleeve and hides the East cap.
+	game.simulation.place("lab", Vector2i(1, 0))
+	check(hub._service_sleeves[BuildingCatalog.DIR_E].visible and not hub._service_caps[BuildingCatalog.DIR_E].visible,
+		"4-Way adapter must dynamically extend East sleeve when Lab docks")
+
+	# Power line crossing over a tunnel renders both visuals independently and stays in bounds.
+	var cross_cell := Vector2i(2, 2)
+	game.simulation.place("tunnel", cross_cell)
+	game.simulation.place("power_line", cross_cell)
+	check(game.site.models.has(cross_cell) and game.site.power_line_models.has(cross_cell),
+		"Scene must render overhead Power Line alongside Connection Tunnel on crossing tile")
+	game.simulation.demolish(cross_cell)
+	check(game.site.models.has(cross_cell) and not game.site.power_line_models.has(cross_cell),
+		"Demolishing crossing must remove Power Line visual while preserving Tunnel visual")
+
+	# Verify ALL 16 bitmask states for support_hub, tunnel, and power_line stay strictly within cell bounds.
+	for kind in ["support_hub", "tunnel", "power_line"]:
+		var model := LunarModule.new()
+		game.site.add_child(model)
+		model.build(kind)
+		model.set_active(true)
+		for mask in range(16):
+			model.set_connections(mask, mask)
+			check(_fits_cell(module_bounds(model, model)),
+				"%s mask %d must stay inside cell footprint" % [kind, mask])
+		model.free()
+
+	# Verify manual rotation HUD feedback and 3D ghost module preview with port markers.
+	game.select_tool("habitat")
+	check(game.hud.facing_label.text == "Facing: Auto", "Selecting module must start in Auto facing mode")
+	game.rotate_preview()
+	check(game.manual_facing == 1 and "East" in game.hud.facing_label.text,
+		"Rotate command must advance manual facing and update HUD")
+	var masks := game.simulation.preview_connection_masks("habitat", Vector2i(1, 0), game.manual_facing)
+	game.site.show_module_preview("habitat", Vector2i(1, 0), game.manual_facing, true, true, masks)
+	check(game.site.preview_root.visible and game.site.preview_ghost != null
+		and game.site.preview_ports_root.get_child_count() > 0,
+		"3D module ghost preview must display oriented mesh and port markers")
+	game.select_tool("")
+	game.restart()
+
+
 func check_module_visuals(game: ColonyGame) -> void:
-	var solar: LunarModule = game.site.models[Vector2i(0, 0)]
+	var solar: LunarModule = game.site.models[Vector2i(0, 1)]
+	var hub: LunarModule = game.site.models[Vector2i(0, 0)]
 	var ice: LunarModule = game.site.models[Vector2i(-3, 0)]
 	var oxygen: LunarModule = game.site.models[Vector2i(-2, 0)]
 	var habitat: LunarModule = game.site.models[Vector2i(-1, 0)]
@@ -170,11 +224,13 @@ func check_module_visuals(game: ColonyGame) -> void:
 	var initial_tracking := solar.mechanism.rotation.x
 	var initial_pump := oxygen.mechanism.position.y
 	var initial_beacon := landing_pad.mechanism.rotation.y
+	var initial_hub := hub.mechanism.rotation.y
 	game.advance(0.25)
 	check(ice.mechanism.rotation.y != initial_rotation, "Powered extractor must turn its drill")
 	check(solar.mechanism.rotation.x != initial_tracking, "Sunlit array must track slowly")
 	check(oxygen.mechanism.position.y != initial_pump, "Active life support must stroke its pump")
 	check(landing_pad.mechanism.rotation.y != initial_beacon, "Active landing pad must scan its approach beacon")
+	check(hub.mechanism.rotation.y != initial_hub, "Active 4-Way adapter must scan its comms dish")
 	check(habitat.glass.emission_energy_multiplier > 0.0, "Supported habitat windows must be lit")
 	check(ice.work_light.visible, "Powered service equipment must illuminate its work area")
 	game.toggle_pause()
@@ -195,25 +251,25 @@ func check_module_visuals(game: ColonyGame) -> void:
 	var night_drill := ice.mechanism.rotation.y
 	game.advance(0.1)
 	check(not solar.active and not ice.active and not oxygen.active and not habitat.active,
-		"Night power loss must reach every starter module's operating state")
+		"Night power loss must reach every starter consumer's operating state")
 	check(solar.mechanism.rotation.x == night_tracking and ice.mechanism.rotation.y == night_drill,
 		"Offline solar tracking and extraction must stop")
 	check(habitat.glass.emission_energy_multiplier == 0.0, "Offline habitat windows must go dark")
 	check(not ice.work_light.visible, "Offline work lights must turn off")
 	check(oxygen.lamps.all(func(lamp: MeshInstance3D): return lamp.material_override == oxygen.unlit),
 		"Offline equipment must not show running telemetry")
-	game.simulation.place("reactor", Vector2i(0, 1))
-	var reactor: LunarModule = game.site.models[Vector2i(0, 1)]
+	game.simulation.place("reactor", Vector2i(0, -1))
+	var reactor: LunarModule = game.site.models[Vector2i(0, -1)]
 	check(reactor.active and ice.active and habitat.active and not solar.active,
 		"Night reactor must restore consumers without claiming solar generation")
-	for kind in ["link", "lab", "mine", "landing_pad"]:
+	for kind in ["support_hub", "tunnel", "power_line", "lab", "mine", "landing_pad"]:
 		var model := LunarModule.new()
 		model.build(kind)
 		model.set_active(true)
 		model.advance(0.25)
 		check(model.lamps.size() > 0, "Every module needs operating telemetry: " + kind)
-		if kind != "link":
-			check(model.mechanism != null, "Production module needs a functional mechanism: " + kind)
+		if not (kind in ["tunnel", "power_line"]):
+			check(model.mechanism != null, "Production/hub module needs a functional mechanism: " + kind)
 		model.free()
 	for model: LunarModule in game.site.models.values():
 		var bounds := module_bounds(model, model)
@@ -233,7 +289,6 @@ func check_structure_states(game: ColonyGame) -> void:
 		model.set_active(true)
 		var pristine_white_v := model.white.albedo_color.v
 
-		# 0% build progress: foundation visible, primary body hidden, construction rig shown.
 		model.set_build_progress(0.0)
 		check(model.foundation_root.visible and model.construction_rig.visible,
 			"0%% construction must show foundation and construction rig: " + kind)
@@ -244,7 +299,6 @@ func check_structure_states(game: ColonyGame) -> void:
 		check(_fits_cell(module_bounds(model, model)),
 			"0%% construction state must fit cell footprint: " + kind)
 
-		# 50% build progress: progressive reveal + crane arm moves when advancing.
 		model.set_build_progress(0.5)
 		var visible_at_50 := _count_visible_body_parts(model)
 		check(visible_at_50 > 0 and visible_at_50 < model._body_parts.size(),
@@ -256,13 +310,11 @@ func check_structure_states(game: ColonyGame) -> void:
 		check(_fits_cell(module_bounds(model, model)),
 			"50%% construction state must fit cell footprint: " + kind)
 
-		# 100% build progress: complete form shown, construction rig hidden.
 		model.set_build_progress(1.0)
 		check(not model.construction_rig.visible, "100%% build must hide construction rig: " + kind)
 		check(_count_visible_body_parts(model) == model._body_parts.size(),
 			"100%% build must reveal all body parts: " + kind)
 
-		# Damaged state: dust-darkened surface + non-color bent panel & hazard placard + warning lamps.
 		model.set_condition(ColonySimulation.CONDITION_DAMAGED)
 		check(model.damage_rig.visible and model.hazard_placard.visible and model.bent_panel.visible,
 			"Damaged state must display non-color hazard placard and bent panel: " + kind)
@@ -272,7 +324,6 @@ func check_structure_states(game: ColonyGame) -> void:
 		check(_fits_cell(module_bounds(model, model)),
 			"Damaged state must fit cell footprint: " + kind)
 
-		# Repairing state: repair arm active + progress segments + EVA tool rack.
 		model.set_condition(ColonySimulation.CONDITION_REPAIRING, 0.6)
 		check(model.repair_rig.visible and not model.damage_rig.visible,
 			"Repairing state must show repair rig and hide damage rig: " + kind)
@@ -286,7 +337,6 @@ func check_structure_states(game: ColonyGame) -> void:
 		check(_fits_cell(module_bounds(model, model)),
 			"Repairing state must fit cell footprint: " + kind)
 
-		# Repaired back to operational: overlays hidden and pristine surface restored.
 		model.set_condition(ColonySimulation.CONDITION_OPERATIONAL)
 		check(not model.damage_rig.visible and not model.repair_rig.visible,
 			"Operational state must hide damage and repair rigs: " + kind)
@@ -296,7 +346,6 @@ func check_structure_states(game: ColonyGame) -> void:
 			"Operational state must fit cell footprint: " + kind)
 		model.free()
 
-	# Authoritative simulation driving scene visuals + pause freeze + HUD text status.
 	var hab_cell := Vector2i(-1, 0)
 	var hab_model: LunarModule = game.site.models[hab_cell]
 	game.simulation.set_building_build_progress(hab_cell, 0.5)
@@ -342,7 +391,6 @@ func check_landing_pad_and_supply_ships(game: ColonyGame) -> void:
 	check("Supplies 0 t" in game.hud.stats.text, "HUD must display initial supply stockpile")
 	check("Next landing:" in game.hud.logistics.text, "HUD must display delivery timing")
 
-	# Pause freezes ship position and supply accounting.
 	game.toggle_pause()
 	var paused_y := lander.craft.position.y
 	game.advance(0.25)
@@ -350,14 +398,12 @@ func check_landing_pad_and_supply_ships(game: ColonyGame) -> void:
 		"Pause must freeze lander motion and deliveries")
 	game.toggle_pause()
 
-	# Advance smoothly through approach and descent -> ship visibly descends before credit.
 	var y_start := lander.craft.position.y
 	for i in range(6):
 		game.advance(0.25)
 	check(lander.craft.position.y < y_start, "Supply ship must visibly descend toward the pad")
 	check(game.simulation.supplies == 0.0, "No supply may be credited while ship is still descending")
 
-	# Advance into delivering on deck (y == DECK_Y), then complete offload for exactly 1 credit.
 	for i in range(4):
 		game.advance(0.20)
 	check(is_equal_approx(game.simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
@@ -370,14 +416,12 @@ func check_landing_pad_and_supply_ships(game: ColonyGame) -> void:
 	check(is_equal_approx(game.simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Departure motion must not double-credit supplies")
 
-	# Large background gap is clamped to 0.25s * speed (no phantom multi-delivery burst).
 	var supplies_before_gap := game.simulation.supplies
 	game.set_speed(4)
 	game.advance(120.0)
 	check(is_equal_approx(game.simulation.supplies, supplies_before_gap),
 		"Large background gap must be clamped and not trigger phantom deliveries")
 
-	# Simultaneous landing pads must have independent landers and scale deliveries cleanly.
 	var pad2_cell := Vector2i(3, -2)
 	check(game.simulation.place("landing_pad", pad2_cell), "Constructing second landing pad must succeed")
 	check(game.site.landers.size() == 2, "Second landing pad must get its own SupplyLander instance")
@@ -385,13 +429,11 @@ func check_landing_pad_and_supply_ships(game: ColonyGame) -> void:
 		"Pads must not share mutable lander instances")
 	check("Supply pads: 2 active" in game.hud.logistics.text, "HUD must show active pad count")
 
-	# Demolishing second pad removes its lander cleanly without stranding ships.
 	game.simulation.demolish(pad2_cell)
 	await process_frame
 	check(game.site.landers.size() == 1 and not game.site.landers.has(pad2_cell),
 		"Demolishing a landing pad must remove its SupplyLander")
 
-	# Restart restores single starter pad, 0 supplies, and visible approaching ship.
 	game.restart()
 	await process_frame
 	check(game.site.landers.size() == 1 and game.site.landers[pad_cell].visible

@@ -103,22 +103,27 @@ or in-code TODO lists.
 | 0 | [#2](https://github.com/rwrife/moonbase/issues/2) | Implemented: Godot project, camera, generated-file ignores, presets and reproducible setup |
 | 0 | [#3](https://github.com/rwrife/moonbase/issues/3) | Implemented: isometric colony first playable and founding charter |
 | 0 | [#7](https://github.com/rwrife/moonbase/issues/7) | Tests/CI and export smoke checks implemented; broader platform/performance qualification remains |
+| 1A | [#32](https://github.com/rwrife/moonbase/issues/32) | Standardized Power & Service Connectors, Connection Tunnels, 4-Way Adapters and Power Lines |
+| 1B | [#33](https://github.com/rwrife/moonbase/issues/33) | Science Lab range-limited prospecting and persistent 3D survey flags |
 | 1 | [#5](https://github.com/rwrife/moonbase/issues/5) | Versioned saves and recovery |
 | 1 | [#6](https://github.com/rwrife/moonbase/issues/6) | Utility storage, capacity, priorities and failure cascades |
-| 1 | [#10](https://github.com/rwrife/moonbase/issues/10) | Forecastable hazards and repairs |
+| 1 | [#10](https://github.com/rwrife/moonbase/issues/10) | Forecastable hazards, multi-stage nuclear meltdown and repairs |
 | 1 | [#20](https://github.com/rwrife/moonbase/issues/20) | Structures: battery, water and oxygen storage visuals |
 | 1–2 | [#21](https://github.com/rwrife/moonbase/issues/21) | Structures: thermal radiator array |
-| 1–2 | [#24](https://github.com/rwrife/moonbase/issues/24) | Structures: shared construction, damage and repair states |
-| 2 | [#4](https://github.com/rwrife/moonbase/issues/4) | Site surveying and strategic terrain |
+| 1–2 | [#24](https://github.com/rwrife/moonbase/issues/24) | Implemented: shared construction, damage and repair states |
+| 2 | [#4](https://github.com/rwrife/moonbase/issues/4) | Site surveying, multi-site biomes and strategic terrain |
 | 2 | [#9](https://github.com/rwrife/moonbase/issues/9) | Branching research and technology choices |
 | 2 | [#11](https://github.com/rwrife/moonbase/issues/11) | Crew roles, health and morale |
-| 2 | [#8](https://github.com/rwrife/moonbase/issues/8) | Supply logistics, contracts, markets and funding board |
+| 2 | [#34](https://github.com/rwrife/moonbase/issues/34) | Tiered habitation, lunar tourism hotels and labor unrest/strikes |
+| 2 | [#8](https://github.com/rwrife/moonbase/issues/8) | Supply logistics, 5-commodity exchange, Comms ticker, contracts and funding board |
+| 2 | [#35](https://github.com/rwrife/moonbase/issues/35) | Extended lunar industry roster, fusion power and mass-driver endgame |
 | 2 | [#16](https://github.com/rwrife/moonbase/issues/16) | Home garage, vehicle fleet and permanent regolith tracks |
 | 2 | [#22](https://github.com/rwrife/moonbase/issues/22) | Structures: landing pad, cargo depot and lander visits |
 | 2 | [#23](https://github.com/rwrife/moonbase/issues/23) | Structures: medical bay, galley cupola and EVA airlock |
 | 3 | [#13](https://github.com/rwrife/moonbase/issues/13) | Tutorial, campaign scenarios and sandbox |
 | 3 | [#14](https://github.com/rwrife/moonbase/issues/14) | High-fidelity lunar art and desktop/Web rendering tiers |
 | 3 | [#12](https://github.com/rwrife/moonbase/issues/12) | UX, accessibility, localization hooks and audio |
+| 3 | [#36](https://github.com/rwrife/moonbase/issues/36) | Strategic overview minimap and subtitled mission-control voice alerts |
 | Release gate | [#1](https://github.com/rwrife/moonbase/issues/1) | Title clearance, licensing, asset provenance and historical verification |
 | 4 | [#15](https://github.com/rwrife/moonbase/issues/15) | Release QA, balancing, packaging and distribution readiness |
 

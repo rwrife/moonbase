@@ -9,6 +9,11 @@ var paused := false
 var speed := 1
 var accumulator := 0.0
 var tool := ""
+var manual_facing := -1
+var last_preview_facing := 0
+var dragging_line := false
+var drag_start_cell := Vector2i(999, 999)
+var drag_path: Array[Vector2i] = []
 var selected := Vector2i(999, 999)
 
 
@@ -20,6 +25,7 @@ func _ready() -> void:
 	hud = ColonyHUD.new()
 	add_child(hud)
 	hud.tool_selected.connect(select_tool)
+	hud.rotate_requested.connect(rotate_preview)
 	hud.pause_requested.connect(toggle_pause)
 	hud.speed_requested.connect(set_speed)
 	hud.restart_requested.connect(restart)
@@ -33,12 +39,31 @@ func _process(delta: float) -> void:
 	advance(delta)
 	var point: Variant = ground_point(get_viewport().get_mouse_position())
 	var over_ui := get_viewport().gui_get_hovered_control() != null
-	if point == null or tool.is_empty() or over_ui:
-		site.preview.visible = false
+	if point == null or tool.is_empty() or (over_ui and not dragging_line):
+		site.hide_previews()
 		return
 	var cell := LunarSite.world_cell(point)
+	if dragging_line and BuildingCatalog.has_kind(tool) and BuildingCatalog.is_line_tool(tool):
+		drag_path = simulation.compute_line_path(tool, drag_start_cell, cell)
+		site.show_line_preview(tool, drag_path, simulation)
+		return
+	if not simulation.is_inside(cell):
+		site.hide_previews()
+		return
 	var valid := tool_error(cell).is_empty()
-	site.show_preview(cell, valid, simulation.is_inside(cell))
+	if BuildingCatalog.has_kind(tool):
+		var effective_facing := effective_facing_for(tool, cell)
+		last_preview_facing = effective_facing
+		var masks := simulation.preview_connection_masks(tool, cell, effective_facing)
+		site.show_module_preview(tool, cell, effective_facing, valid, true, masks)
+	else:
+		site.show_preview(cell, valid, true)
+
+
+func effective_facing_for(kind: String, cell: Vector2i) -> int:
+	if manual_facing >= 0:
+		return BuildingCatalog.normalize_facing(manual_facing)
+	return simulation.compute_auto_facing(kind, cell)
 
 
 func advance(delta: float) -> void:
@@ -55,7 +80,7 @@ func advance(delta: float) -> void:
 func tool_error(cell: Vector2i) -> String:
 	match tool:
 		"demolish":
-			return "" if simulation.buildings.has(cell) else "Select an occupied tile to demolish."
+			return "" if (simulation.buildings.has(cell) or simulation.power_lines.has(cell)) else "Select an occupied tile to demolish."
 		"bulldoze":
 			return simulation.bulldoze_error(cell)
 	return simulation.placement_error(tool, cell)
@@ -86,15 +111,56 @@ func _unhandled_input(event: InputEvent) -> void:
 		set_speed(2)
 	elif event.is_action_pressed("speed_four"):
 		set_speed(4)
+	elif event.is_action_pressed("rotate_cw"):
+		rotate_preview()
 	elif event.is_action_pressed("ui_cancel"):
-		select_tool("")
-	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
+		if dragging_line:
+			_cancel_line_drag()
+		else:
 			select_tool("")
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			if dragging_line:
+				_cancel_line_drag()
+			else:
+				select_tool("")
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			var point: Variant = ground_point(event.position)
-			if point != null:
-				activate_cell(LunarSite.world_cell(point))
+			if event.pressed:
+				var point: Variant = ground_point(event.position)
+				if point != null:
+					var cell := LunarSite.world_cell(point)
+					if BuildingCatalog.has_kind(tool) and BuildingCatalog.is_line_tool(tool):
+						dragging_line = true
+						drag_start_cell = cell
+						drag_path = [cell]
+						site.show_line_preview(tool, drag_path, simulation)
+					else:
+						activate_cell(cell)
+			elif dragging_line:
+				var point: Variant = ground_point(event.position)
+				var end_cell := LunarSite.world_cell(point) if point != null else drag_start_cell
+				var path := simulation.compute_line_path(tool, drag_start_cell, end_cell)
+				_cancel_line_drag()
+				if path.size() == 1:
+					simulation.place(tool, path[0])
+				else:
+					simulation.place_line_path(tool, path)
+
+
+func _cancel_line_drag() -> void:
+	dragging_line = false
+	drag_start_cell = Vector2i(999, 999)
+	drag_path.clear()
+	site.path_preview_root.visible = false
+
+
+func rotate_preview() -> void:
+	if not BuildingCatalog.has_kind(tool):
+		return
+	var base := last_preview_facing if manual_facing < 0 else manual_facing
+	manual_facing = BuildingCatalog.normalize_facing(base + 1)
+	last_preview_facing = manual_facing
+	hud.set_facing_mode(manual_facing)
 
 
 func activate_cell(cell: Vector2i) -> void:
@@ -103,17 +169,20 @@ func activate_cell(cell: Vector2i) -> void:
 	elif tool == "bulldoze":
 		simulation.bulldoze(cell)
 	elif not tool.is_empty():
-		simulation.place(tool, cell)
+		simulation.place(tool, cell, manual_facing)
 	else:
 		selected = cell
 		hud.inspect(simulation, selected)
 
 
 func select_tool(kind: String) -> void:
-	tool = kind
-	hud.set_tool(kind)
-	site.preview.visible = false
-	site.set_overlay(not kind.is_empty())
+	_cancel_line_drag()
+	tool = BuildingCatalog.canonical_kind(kind) if BuildingCatalog.has_kind(kind) else kind
+	manual_facing = -1
+	hud.set_tool(tool)
+	hud.set_facing_mode(manual_facing)
+	site.hide_previews()
+	site.set_overlay(not tool.is_empty())
 
 
 func toggle_pause() -> void:

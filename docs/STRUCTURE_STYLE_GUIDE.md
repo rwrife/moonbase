@@ -26,11 +26,12 @@ and its motion, and must still read clearly at gameplay zoom.
 
 | Rule | Value |
 | --- | --- |
-| Grid cell | `LunarSite.CELL_SIZE` = 2.3 units; all geometry stays within ±1.15 on X/Z (tested) |
+| Grid cell | `LunarSite.CELL_SIZE` = 2.3 units; all geometry stays within ±1.15 on X/Z (tested across all 16 connector bitmasks) |
 | Foundation | Dark equipment skid ~2.18 × 0.13 × 2.18 with four leveling feet and a silver frame |
-| Utility sockets | Gold-quilted ports on all four sides at ±1.07, y ≈ 0.32 (orthogonal adjacency) |
-| Height | Production/crew structures ≥ 1.7 units tall (tested); links stay low |
-| Front | +Z faces the default camera: status lamp, hatch, labels and main panel go here |
+| Service connectors | Centerline docking collar at `x/z = 0`, `y = 0.78`, flush to `±1.145` when mated (`±1.05` sealed bulkhead when unmated); 2-port chainable modules expose `+Z` and `-Z`, 1-port terminals expose `+Z`, `support_hub` and `tunnel` expose all 4 cardinal sides |
+| Power connectors | Standardized HV amber/dark receptacle at `y = 0.28` flush to `±1.10` (plus automatic pass-through on mated Service faces); `power_line` overhead gantry clears tunnels at `y = 1.60` |
+| Height | Production/crew/hub structures ≥ 1.7 units tall (tested); `tunnel` stays ≤ 1.25 so overhead `power_line` crossings clear it cleanly |
+| Front | +Z faces the default camera (`facing = 0`); modules rotate in 90° steps (`0..3`) around +Y |
 | Pivot | Model origin is the cell center at pad height; `LunarSite` positions it |
 
 Multi-cell structures (landing pads, large radiators) are not supported by the

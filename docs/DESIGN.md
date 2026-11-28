@@ -77,23 +77,21 @@ shortages, morale loss, and debt rather than permanent death or a hard game-over
 
 ### Prototype building specification
 
-All buildings occupy one tile. Orthogonal adjacency connects modules;
-utility links bridge gaps. Construction is instantaneous and levels its own pad.
-Bulldozing rough regolith into a pad costs 15 credits. Landmark craters and
-boulders from the site survey are immovable and block construction. Vehicles that
-drive out of a home garage and leave permanent tracks are planned in #16.
+All buildings occupy one tile and expose a standardized **Power Connector** (HV bus) plus **1 or 2 Service Connectors** (centerline pressurized/logistics corridor carrying humans, water, oxygen, heat, and resources). **2-port chainable modules** (`habitat`, `oxygen`, `lab`, `mine`) connect front-to-back in linear spines; **1-port terminal modules** (`ice`, `solar`, `reactor`, `landing_pad`) cap branch ends. Use **`4-Way adapter` (`support_hub`)** and **`Connection tunnel` (`tunnel`)** to branch and turn corners, or run **`Power line` (`power_line`)** pylons (able to cross tunnels) to wire remote generators and outposts. Placement auto-orients toward adjacent ports (`R` rotates manually in 90° steps) with a 3D port-alignment preview; `tunnel` and `power_line` support click-and-drag L-path routing. Bulldozing rough regolith into a pad costs 15 credits. Landmark craters and boulders from the site survey are immovable and block construction. Vehicles that drive out of a home garage and leave permanent tracks are planned in #16.
 
-| Building | Credits | Upkeep/day | Supply or demand |
-| --- | ---: | ---: | --- |
-| Utility link | 20 | 0 | Carries the shared utility network |
-| Habitat | 250 | 2 | 8 crew; uses 3 power, 2 water, 2 oxygen, 2 heat |
-| Solar array | 160 | 1 | 12 power in sunlight, 0 at night |
-| Fission reactor | 600 | 6 | 24 power, 12 heat; no fuel model yet |
-| Ice extractor | 200 | 2 | Uses 3 power; produces 10 water; ice-only placement |
-| Life support | 220 | 2 | Uses 3 power and 2 water; produces 12 oxygen and 4 heat |
-| Science lab | 300 | 3 | Uses 4 power; 1 science/day with safe crew |
-| Regolith refinery | 280 | 3 | Uses 5 power; 2 export units/day at 12 credits/unit |
-| Landing pad | 240 | 0 | Self-powered beacon; receives +4 t supplies every 6 days per operational pad |
+| Building | Credits | Upkeep/day | Service ports | Supply or demand |
+| --- | ---: | ---: | --- | --- |
+| 4-Way adapter (`support_hub`) | 90 | 1 | 4 (N/E/S/W) | Pressurized 4-way docking hub + power bus; dynamically extends sleeves on connected sides |
+| Connection tunnel (`tunnel`) | 20 | 0 | 4 (auto-mesh) | Pressurized service corridor carrying humans, water, oxygen, heat, and power |
+| Power line (`power_line`) | 6 | 0 | 0 (power only) | Elevated HV power pylons carrying electricity only; crosses cleanly over tunnels |
+| Habitat | 250 | 2 | 2 (chainable) | 8 crew; uses 3 power, 2 water, 2 oxygen, 2 heat |
+| Solar array | 160 | 1 | 1 (terminal) | 12 power in sunlight, 0 at night |
+| Fission reactor | 600 | 6 | 1 (terminal) | 24 power, 12 heat; can wire remotely via power lines |
+| Ice extractor | 200 | 2 | 1 (terminal) | Uses 3 power; produces 10 water; ice-only placement |
+| Life support | 220 | 2 | 2 (chainable) | Uses 3 power and 2 water; produces 12 oxygen and 4 heat |
+| Science lab | 300 | 3 | 2 (chainable) | Uses 4 power; 1 science/day with power and service-corridor crew access |
+| Regolith refinery | 280 | 3 | 2 (chainable) | Uses 5 power; 2 export units/day at 12 credits/unit with power and crew access |
+| Landing pad | 240 | 0 | 1 (terminal) | Self-powered beacon; receives +4 t supplies every 6 days per operational pad |
 
 ### Supplies and recurring landings
 
