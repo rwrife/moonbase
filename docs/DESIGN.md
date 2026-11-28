@@ -70,8 +70,9 @@ science, and exports while maintaining safe habitats.
 The completion condition is day 30 or later, at least 30 science, at least
 40 export units, all crew supplied, and morale of at least 65.
 
-One day advances per second at 1x; pause, 2x, and 4x are available.
-Days 21-30 of each artificial 30-day cycle are dark. There is no claim that this
+One day advances every four seconds at 1x; pause, 2x, and 4x are available.
+Days 1-24 (80%) of each artificial 30-day cycle are sunlit and days 25-30 (20%)
+are dark, with smooth dusk and dawn lighting transitions. There is no claim that this
 is a faithful lunar illumination model. The initial failure model produces
 shortages, morale loss, and debt rather than permanent death or a hard game-over.
 

@@ -37,6 +37,7 @@ func run() -> void:
 	await process_frame
 	check(game.site.models.size() == 5, "Scene must display starter modules including landing pad")
 	check_module_visuals(game)
+	check_day_night_fade(game)
 	check_structure_states(game)
 	await check_landing_pad_and_supply_ships(game)
 	check(game.camera_rig.camera.projection == Camera3D.PROJECTION_ORTHOGONAL,
@@ -95,14 +96,17 @@ func run() -> void:
 	check(game.speed == 1, "HUD must select 1x speed")
 	for i in range(4):
 		game.advance(0.25)
-	check(game.simulation.day == 2, "1x must tick once per second")
+	check(game.simulation.day == 1, "1x clock must move slower than one day per second")
+	for i in range(12):
+		game.advance(0.25)
+	check(game.simulation.day == 2, "1x must tick once every SECONDS_PER_DAY seconds")
 	game.hud.speed_buttons[4].pressed.emit()
 	check(game.speed == 4, "HUD must select 4x speed")
 	for i in range(4):
 		game.advance(0.25)
-	check(game.simulation.day == 6, "4x must tick four times per second")
+	check(game.simulation.day == 3, "4x must tick four times faster than 1x")
 	game.advance(60)
-	check(game.simulation.day == 7, "Background gaps must not fast-forward the colony")
+	check(game.simulation.day == 3, "Background gaps must not fast-forward the colony")
 	game.restart()
 	check(not game.site.terrain.pad_targets.has(pad) and _visible_rocks(game.site, pad) == hidden_before,
 		"Restart must restore undisturbed regolith and rocks")
@@ -188,7 +192,8 @@ func check_module_visuals(game: ColonyGame) -> void:
 	var before := ice.operating_time
 	game.advance(0.1)
 	check(is_equal_approx(ice.operating_time - before, 0.4), "Animation must follow game speed")
-	game.simulation.day = 21
+	game.simulation.day = ColonySimulation.DAYLIGHT_DAYS + 1
+	game.simulation.day_accumulator = 0.0
 	game.simulation.recalculate()
 	game.refresh()
 	var night_tracking := solar.mechanism.rotation.x
@@ -221,6 +226,52 @@ func check_module_visuals(game: ColonyGame) -> void:
 			"Detailed hardware must fit its construction cell: " + str(model.get_meta("kind")))
 		check(bounds.size.y >= 1.7,
 			"Starter and reactor silhouettes must be substantial: " + str(model.get_meta("kind")))
+	game.restart()
+
+
+func check_day_night_fade(game: ColonyGame) -> void:
+	game.restart()
+	check(is_equal_approx(game.site.sun.light_energy, LunarSite.DAY_ENERGY),
+		"New game must start with full daylight energy")
+	# Dusk fade: smoothly decrease from DAY_ENERGY to NIGHT_ENERGY across twilight.
+	game.simulation.day = ColonySimulation.DAYLIGHT_DAYS - 1
+	game.simulation.day_accumulator = 0.5
+	game.refresh()
+	var prev_energy := game.site.sun.light_energy
+	check(is_equal_approx(prev_energy, LunarSite.DAY_ENERGY),
+		"Dusk start must still be at full daylight energy")
+	var saw_intermediate := false
+	for i in range(24):
+		game.advance(0.25)
+		var energy := game.site.sun.light_energy
+		check(energy <= prev_energy + 0.0001, "Dusk lighting must fade monotonically downward")
+		if energy < LunarSite.DAY_ENERGY - 0.1 and energy > LunarSite.NIGHT_ENERGY + 0.1:
+			saw_intermediate = true
+		prev_energy = energy
+	check(saw_intermediate, "Dusk transition must pass through intermediate faded lighting")
+	check(is_equal_approx(game.site.sun.light_energy, LunarSite.NIGHT_ENERGY),
+		"Dusk transition must settle at night lighting energy")
+	# Pause must freeze twilight mid-transition.
+	game.simulation.day = ColonySimulation.CYCLE_DAYS
+	game.simulation.day_accumulator = 0.25
+	game.refresh()
+	var mid_dawn_energy := game.site.sun.light_energy
+	check(mid_dawn_energy > LunarSite.NIGHT_ENERGY + 0.1 and mid_dawn_energy < LunarSite.DAY_ENERGY - 0.1,
+		"Dawn midpoint must render intermediate lighting")
+	game.toggle_pause()
+	game.advance(0.25)
+	check(is_equal_approx(game.site.sun.light_energy, mid_dawn_energy),
+		"Pause must freeze day/night lighting transition")
+	game.toggle_pause()
+	# Dawn fade: smoothly increase back to DAY_ENERGY at sunrise.
+	prev_energy = game.site.sun.light_energy
+	for i in range(12):
+		game.advance(0.25)
+		var energy := game.site.sun.light_energy
+		check(energy >= prev_energy - 0.0001, "Dawn lighting must fade monotonically upward")
+		prev_energy = energy
+	check(is_equal_approx(game.site.sun.light_energy, LunarSite.DAY_ENERGY),
+		"Dawn transition must settle back at full daylight energy")
 	game.restart()
 
 
@@ -352,13 +403,13 @@ func check_landing_pad_and_supply_ships(game: ColonyGame) -> void:
 
 	# Advance smoothly through approach and descent -> ship visibly descends before credit.
 	var y_start := lander.craft.position.y
-	for i in range(6):
+	for i in range(24):
 		game.advance(0.25)
 	check(lander.craft.position.y < y_start, "Supply ship must visibly descend toward the pad")
 	check(game.simulation.supplies == 0.0, "No supply may be credited while ship is still descending")
 
 	# Advance into delivering on deck (y == DECK_Y), then complete offload for exactly 1 credit.
-	for i in range(4):
+	for i in range(16):
 		game.advance(0.20)
 	check(is_equal_approx(game.simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_AMOUNT),
 		"Completed landing must credit one supply shipment")
