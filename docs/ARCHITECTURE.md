@@ -25,7 +25,8 @@ scenes/main.tscn                 # Composition entry point
 scripts/
   main.gd                       # Fixed clock, commands and component wiring
   building_catalog.gd           # Building definitions
-  colony_simulation.gd          # State, validation, networks, deliveries, economy, charter and state export/import
+  colony_simulation.gd          # State, validation, deliveries, economy, charter and state export/import
+  utility_network.gd            # Deterministic layered utility solver (storage, priorities, capacity/loss, diagnostics)
   lunar_site.gd                 # Visual world: terrain meshes, rocks, boulders, modules, landers, lighting
   lunar_module.gd               # Spacecraft-style procedural hardware and shared build/damage/repair/active states
   supply_lander.gd              # Original SELENE supply lander driven by authoritative delivery state
@@ -75,30 +76,33 @@ Commit script `.gd.uid` sidecars; ignore `.godot/` and generated build outputs.
 - Signals communicate changed state and explicit notifications. The HUD does
   not independently calculate production or alter authoritative state.
 
-## Shared utility network: first playable
+## Layered utility network solver (`UtilityNetwork`)
 
-Each occupied tile, including a utility link, is a node. Orthogonal adjacency
-creates an edge. Diagonal placement does not connect. Discover components using
-a visited set and queue; rebuild after construction or demolition.
+`scripts/utility_network.gd` evaluates `power`, `water`, `oxygen`, and `heat` as
+distinct connected-component layers over orthogonal neighbor ports:
 
-For each component:
+1. **Per-layer topology:** Each layer discovers connected components independently
+   in deterministic sorted `(x, y)` cell order. Buildings may declare supported
+   `layers`, directional `ports`, or an `isolated` flag to disconnect from neighbors.
+2. **Deterministic snapshot fixed-point:** Evaluation starts from a conservative
+   snapshot where only unconditional, operational, non-isolated generators/links
+   are active, then runs a bounded fixed-point loop (`MAX_ITERATIONS = 16`). Each
+   iteration reads only the previous snapshot so dictionary order never affects
+   results. Oscillating dependency cycles are detected by state signature and
+   resolved conservatively to the intersection of the cycle.
+3. **Priority shedding and storage conservation:** Each layer allocates effective
+   generation (after optional transport losses and bottleneck caps) plus available
+   storage discharge strictly by priority tier (`Life Support` -> `Habitats` ->
+   `Production`) and sorted `(x, y)` order. Under `protect_essential`, storage
+   below `reserve_floor` is reserved for life support and habitats. `apply_storage_step`
+   charges from surplus and deducts used discharge once per simulation day without
+   creating resources.
+4. **Cause-chain diagnostics:** Network summaries expose `shortages`, `causes`
+   (tracing downstream water/oxygen/heat failures to upstream power/night/damage),
+   `shed_cells`, per-layer `storage`, and estimated `reserve_days`.
 
-1. Sum available power, accounting for the artificial day/night cycle.
-2. Sum power demand. If overloaded, shut powered consumers down together.
-3. Evaluate powered ice extraction, then compare water supply with demand.
-4. Evaluate powered, watered life support; reactors independently produce heat.
-5. Check habitat oxygen, water, heat, and power requirements.
-6. Mark module status and identify shortages for inspection and HUD warnings.
-7. Permit lab/refinery production only when powered and a nonempty crew is safe.
-
-Evaluate from a snapshot rather than dictionary iteration order. Disconnected
-components cannot share supply, even if total colony production exceeds total
-demand. Colony-wide totals are informational only; display component deficits
-so healthy totals cannot mask an isolated habitat.
-
-The first version has no tanks, batteries, pressure, transport capacity, or
-separate network layers. The network upgrade issue introduces those features
-with explicit priorities, storage accounting, and failure cascades.
+Player-facing storage structures (`#20`), HUD cause-chain/reserve overlays, and
+interactive isolation controls build on this solver in follow-up PRs.
 
 ## Construction and camera
 
