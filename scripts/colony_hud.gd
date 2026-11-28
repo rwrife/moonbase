@@ -2,6 +2,7 @@ class_name ColonyHUD
 extends CanvasLayer
 
 signal tool_selected(kind: String)
+signal selection_cleared
 signal pause_requested
 signal speed_requested(value: int)
 signal restart_requested
@@ -12,6 +13,9 @@ var utilities: Label
 var logistics: Label
 var objective: Label
 var event_log: Label
+var details_panel: PanelContainer
+var details_title: Label
+var close_details_button: Button
 var inspector: Label
 var tool_label: Label
 var pause_button: Button
@@ -93,17 +97,35 @@ func _ready() -> void:
 	demolish.toggle_mode = true
 	tool_buttons["demolish"] = demolish
 	tools.add_child(demolish)
-	tools.add_child(HSeparator.new())
-	tools.add_child(_label("SELECTED MODULE", 19))
-	inspector = _label("Click a module to inspect its local utility network.")
-	inspector.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tools.add_child(inspector)
 	var left := _panel(root, Vector2(0, 0), Vector2(0, 0), Vector4(16, 212, 315, 340))
 	var mission := VBoxContainer.new()
 	left.add_child(mission)
 	mission.add_child(_label("FOUNDING CHARTER", 20))
 	objective = _label("")
 	mission.add_child(objective)
+	details_panel = _panel(root, Vector2(0, 0), Vector2(0, 1), Vector4(16, 352, 315, -110))
+	details_panel.name = "DetailsPanel"
+	details_panel.visible = false
+	var details_box := VBoxContainer.new()
+	details_panel.add_child(details_box)
+	var details_header := HBoxContainer.new()
+	details_box.add_child(details_header)
+	details_title = _label("MODULE DETAILS", 19)
+	details_title.add_theme_color_override("font_color", Color(0.45, 0.84, 0.9))
+	details_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details_header.add_child(details_title)
+	close_details_button = _button("X", func(): selection_cleared.emit())
+	close_details_button.tooltip_text = "Close details [Esc]"
+	details_header.add_child(close_details_button)
+	details_box.add_child(HSeparator.new())
+	var details_scroll := ScrollContainer.new()
+	details_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	details_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	details_box.add_child(details_scroll)
+	inspector = _label("Click a module to inspect its properties and local utility network.", 15)
+	inspector.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inspector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details_scroll.add_child(inspector)
 	var bottom := _panel(root, Vector2(0, 1), Vector2(1, 1), Vector4(16, -98, -16, -16))
 	var footer := VBoxContainer.new()
 	bottom.add_child(footer)
@@ -219,11 +241,63 @@ func _status_text(building: Dictionary) -> String:
 	return "ONLINE" if building["active"] else "OFFLINE"
 
 
+func _condition_label(building: Dictionary) -> String:
+	var cond := str(building.get("condition", ColonySimulation.CONDITION_OPERATIONAL))
+	if cond == ColonySimulation.CONDITION_DAMAGED:
+		return "Damaged (fault)"
+	if cond == ColonySimulation.CONDITION_REPAIRING:
+		return "Repairing (%.0f%%)" % (float(building.get("repair_progress", 0.0)) * 100.0)
+	var build_p := float(building.get("build_progress", 1.0))
+	if build_p < 1.0:
+		return "Constructing (%.0f%%)" % (build_p * 100.0)
+	return "Operational"
+
+
+func _module_outputs(building: Dictionary, data: Dictionary, simulation: ColonySimulation) -> String:
+	var outputs: PackedStringArray = []
+	for utility in ["power", "water", "oxygen", "heat"]:
+		var amount := float(data.get(utility, 0.0))
+		if amount > 0.0:
+			if building["kind"] == "solar" and utility == "power" and simulation.is_night():
+				outputs.append("0 %s (night)" % utility)
+			else:
+				outputs.append("+%.0f %s" % [amount, utility])
+	match str(building["kind"]):
+		"habitat":
+			outputs.append("8 crew capacity")
+		"lab":
+			outputs.append("+1 science/day")
+		"mine":
+			outputs.append("+2 exports/day (+24 cr/d)")
+		"landing_pad":
+			outputs.append("+%.0f %s supplies / %.0fd" % [
+				ColonySimulation.SUPPLY_DELIVERY_AMOUNT,
+				ColonySimulation.SUPPLY_DELIVERY_UNIT,
+				ColonySimulation.SUPPLY_DELIVERY_INTERVAL
+			])
+		"link":
+			outputs.append("Transfers all utilities")
+	return "None" if outputs.is_empty() else ", ".join(outputs)
+
+
+func _module_demands(data: Dictionary) -> String:
+	var demands: PackedStringArray = []
+	for utility in ["power", "water", "oxygen", "heat"]:
+		var amount := float(data.get(utility + "_use", 0.0))
+		if amount > 0.0:
+			demands.append("%.0f %s" % [amount, utility])
+	return "None" if demands.is_empty() else ", ".join(demands)
+
+
 func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 	if not simulation.buildings.has(cell):
 		if not simulation.is_inside(cell):
-			inspector.text = "Click a module to inspect its local utility network.\nFrosted ground contains ice."
+			details_panel.visible = false
+			details_title.text = "MODULE DETAILS"
+			inspector.text = "Click a module to inspect its properties and local utility network.\nFrosted ground contains ice."
 			return
+		details_panel.visible = true
+		details_title.text = "TILE DETAILS"
 		var lines: PackedStringArray = ["Tile %d, %d" % [cell.x, cell.y]]
 		if simulation.blocked.has(cell):
 			lines.append("Immovable %s: cannot be built on." % simulation.blocked[cell])
@@ -235,6 +309,8 @@ func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 			lines.append("Ice deposit: suitable for an ice extractor.")
 		inspector.text = "\n".join(lines)
 		return
+	details_panel.visible = true
+	details_title.text = "MODULE DETAILS"
 	var building: Dictionary = simulation.buildings[cell]
 	var data := BuildingCatalog.definition(building["kind"])
 	var network: Dictionary = simulation.networks[building["network"]]
@@ -242,6 +318,12 @@ func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 		"%s #%d" % [data["name"], building["id"]],
 		"Tile %d, %d  /  %s" % [cell.x, cell.y, _status_text(building)],
 		str(data["description"]),
+		"",
+		"Properties:",
+		"Cost: %d cr  |  Upkeep: %d cr/d" % [int(data["cost"]), int(data["upkeep"])],
+		"Condition: %s" % _condition_label(building),
+		"Output: %s" % _module_outputs(building, data, simulation),
+		"Demand: %s" % _module_demands(data),
 	]
 	if building["kind"] == "landing_pad":
 		var delivery := simulation.delivery_for_cell(cell)
@@ -257,11 +339,15 @@ func inspect(simulation: ColonySimulation, cell: Vector2i) -> void:
 				simulation.supplies, ColonySimulation.SUPPLY_DELIVERY_UNIT
 			])
 	lines.append("")
-	lines.append("Local supply / demand:")
-	for utility in ["power", "water", "oxygen", "heat"]:
-		lines.append("%s: %.0f / %.0f" % [
-			utility.capitalize(), network["supply"][utility], network["demand"][utility]
-		])
+	lines.append("Local network (supply / demand):")
+	lines.append("Power: %.0f/%.0f   |   Water: %.0f/%.0f" % [
+		network["supply"]["power"], network["demand"]["power"],
+		network["supply"]["water"], network["demand"]["water"]
+	])
+	lines.append("Oxygen: %.0f/%.0f   |   Heat: %.0f/%.0f" % [
+		network["supply"]["oxygen"], network["demand"]["oxygen"],
+		network["supply"]["heat"], network["demand"]["heat"]
+	])
 	var shortages: Array[String] = network["shortages"]
 	lines.append("Shortage: " + ("none" if shortages.is_empty() else ", ".join(shortages)))
 	inspector.text = "\n".join(lines)

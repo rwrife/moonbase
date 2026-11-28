@@ -22,6 +22,7 @@ func _ready() -> void:
 	hud = ColonyHUD.new()
 	add_child(hud)
 	hud.tool_selected.connect(select_tool)
+	hud.selection_cleared.connect(clear_selection)
 	hud.pause_requested.connect(toggle_pause)
 	hud.speed_requested.connect(set_speed)
 	hud.restart_requested.connect(restart)
@@ -90,10 +91,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("speed_four"):
 		set_speed(4)
 	elif event.is_action_pressed("ui_cancel"):
-		select_tool("")
+		if tool.is_empty():
+			clear_selection()
+		else:
+			select_tool("")
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
-			select_tool("")
+			if tool.is_empty():
+				clear_selection()
+			else:
+				select_tool("")
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			var point: Variant = ground_point(event.position)
 			if point != null:
@@ -102,14 +109,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func activate_cell(cell: Vector2i) -> void:
 	if tool == "demolish":
-		simulation.demolish(cell)
+		if simulation.demolish(cell) and selected == cell:
+			clear_selection()
 	elif tool == "bulldoze":
 		simulation.bulldoze(cell)
 	elif not tool.is_empty():
 		simulation.place(tool, cell)
 	else:
 		selected = cell
+		site.set_selection(selected, simulation.buildings.has(selected))
 		hud.inspect(simulation, selected)
+
+
+func clear_selection() -> void:
+	selected = Vector2i(999, 999)
+	site.set_selection(selected, false)
+	hud.inspect(simulation, selected)
 
 
 func select_tool(kind: String) -> void:
@@ -160,4 +175,5 @@ func camera_command(command: String) -> void:
 
 func refresh() -> void:
 	site.synchronize(simulation)
+	site.set_selection(selected, simulation.buildings.has(selected))
 	hud.update_state(simulation, paused, speed, selected)
