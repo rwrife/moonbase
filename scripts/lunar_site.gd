@@ -27,11 +27,15 @@ var models: Dictionary = {}
 var landers: Dictionary = {}
 var indicators: Dictionary = {}
 var preview: MeshInstance3D
+var selection_box: Node3D
 var sun: DirectionalLight3D
 var environment_settings: Environment
 var good_material: StandardMaterial3D
 var bad_material: StandardMaterial3D
 var neutral_material: StandardMaterial3D
+var selection_material: StandardMaterial3D
+var selection_corner_material: StandardMaterial3D
+var selection_fill_material: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -77,6 +81,7 @@ func _ready() -> void:
 		Vector3.ZERO, good_material)
 	preview.visible = false
 	preview.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_build_selection_box()
 
 
 static func cell_position(cell: Vector2i) -> Vector3:
@@ -406,6 +411,55 @@ func show_preview(cell: Vector2i, valid: bool, enabled: bool) -> void:
 	preview.visible = enabled
 	preview.position = surface_position(cell) + Vector3(0, 0.06, 0)
 	preview.material_override = good_material if valid else bad_material
+
+
+func _build_selection_box() -> void:
+	selection_material = _material(Color(0.32, 0.9, 1.0, 0.92), true)
+	selection_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	selection_corner_material = _material(Color(0.76, 0.98, 1.0, 1.0), true)
+	selection_fill_material = _material(Color(0.28, 0.85, 1.0, 0.14), true)
+	selection_fill_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	selection_box = Node3D.new()
+	selection_box.name = "SelectionBox"
+	selection_box.visible = false
+	add_child(selection_box)
+	var span := CELL_SIZE * 1.08
+	var half := span * 0.5
+	var rail := 0.09
+	var rail_h := 0.08
+	var inner_span := span - rail * 2.0
+	var fill := _box(selection_box, Vector3(inner_span, 0.02, inner_span),
+		Vector3(0, -0.025, 0), selection_fill_material)
+	fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for edge in [
+		[Vector3(span, rail_h, rail), Vector3(0, 0, -half + rail * 0.5)],
+		[Vector3(span, rail_h, rail), Vector3(0, 0, half - rail * 0.5)],
+		[Vector3(rail, rail_h, inner_span), Vector3(-half + rail * 0.5, 0, 0)],
+		[Vector3(rail, rail_h, inner_span), Vector3(half - rail * 0.5, 0, 0)],
+	]:
+		var bar := _box(selection_box, edge[0], edge[1], selection_material)
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var corner_len := 0.48
+	var corner_w := 0.13
+	var corner_h := 0.14
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var cx := sx * (half - corner_len * 0.5)
+			var cz := sz * (half - corner_w * 0.5)
+			var hbar := _box(selection_box, Vector3(corner_len, corner_h, corner_w),
+				Vector3(cx, 0.03, cz), selection_corner_material)
+			hbar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var vx := sx * (half - corner_w * 0.5)
+			var vz := sz * (half - corner_len * 0.5)
+			var vbar := _box(selection_box, Vector3(corner_w, corner_h, corner_len),
+				Vector3(vx, 0.03, vz), selection_corner_material)
+			vbar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func set_selection(cell: Vector2i, enabled: bool) -> void:
+	selection_box.visible = enabled
+	if enabled:
+		selection_box.position = surface_position(cell) + Vector3(0, 0.08, 0)
 
 
 func _create_module(cell: Vector2i, kind: String) -> void:

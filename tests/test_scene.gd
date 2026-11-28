@@ -62,12 +62,33 @@ func run() -> void:
 		"Clicking an occupied cell must not charge or add a duplicate visual")
 	check(game.hud.event_log.text == "This tile is occupied.", "World rejection must reach HUD")
 	game.select_tool("")
+	check(not game.site.selection_box.visible and not game.hud.details_panel.visible,
+		"Ground selection box and details panel must start hidden")
 	game.activate_cell(Vector2i(0, 1))
 	check("Fission reactor" in game.hud.inspector.text, "Selection must inspect local module")
+	check(game.site.selection_box.visible, "Selecting a module must show the ground selection box")
+	var expected_pos := game.site.surface_position(Vector2i(0, 1))
+	check(is_equal_approx(game.site.selection_box.position.x, expected_pos.x)
+		and is_equal_approx(game.site.selection_box.position.z, expected_pos.z)
+		and game.site.selection_box.position.y > expected_pos.y,
+		"Ground selection box must align with the selected module's ground pad")
+	check(game.hud.details_panel.visible and game.hud.details_title.text == "MODULE DETAILS",
+		"Selecting a module must display the module details panel")
+	check("Cost: 600 cr" in game.hud.inspector.text and "Upkeep: 6 cr/d" in game.hud.inspector.text
+		and "+24 power" in game.hud.inspector.text and "Condition: Operational" in game.hud.inspector.text,
+		"Details panel must show module properties and outputs")
+	game.hud.close_details_button.pressed.emit()
+	check(not game.site.selection_box.visible and not game.hud.details_panel.visible,
+		"Closing the details panel must clear selection and hide the ground box")
+	game.activate_cell(Vector2i(0, 1))
+	check(game.site.selection_box.visible and game.hud.details_panel.visible,
+		"Re-selecting a module must restore the ground box and details panel")
 	game.select_tool("demolish")
 	game.activate_cell(Vector2i(0, 1))
 	await process_frame
 	check(game.site.models.size() == 5, "Demolition must remove visual module")
+	check(not game.site.selection_box.visible and not game.hud.details_panel.visible,
+		"Demolishing the selected module must hide the ground selection box and details panel")
 	var pad := Vector2i(4, -4)
 	var rough := game.site.terrain.pad_targets.has(pad)
 	var hidden_before := _visible_rocks(game.site, pad)
@@ -87,6 +108,9 @@ func run() -> void:
 	game.select_tool("")
 	game.activate_cell(blocked)
 	check("Immovable" in game.hud.inspector.text, "Inspector must describe immovable terrain")
+	check(not game.site.selection_box.visible and game.hud.details_panel.visible
+		and game.hud.details_title.text == "TILE DETAILS",
+		"Selecting an empty/blocked tile must hide the module selection box and show tile details")
 	game.toggle_pause()
 	for i in range(8):
 		game.advance(0.25)
