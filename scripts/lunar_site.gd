@@ -6,6 +6,12 @@ const TERRAIN_SEED := 1972
 const SUN_ROTATION := Vector3(-22.0, -90.0, 0.0)
 const DAY_COLOR := Color(1.0, 0.985, 0.96)
 const DAY_ENERGY := 3.2
+const NIGHT_COLOR := Color(0.55, 0.66, 1.0)
+const NIGHT_ENERGY := 0.22
+const DAY_AMBIENT_COLOR := Color(0.78, 0.78, 0.8)
+const NIGHT_AMBIENT_COLOR := Color(0.45, 0.54, 0.76)
+const DAY_AMBIENT_ENERGY := 0.09
+const NIGHT_AMBIENT_ENERGY := 0.055
 const REGOLITH_SHADER := preload("res://shaders/regolith.gdshader")
 
 var terrain: LunarTerrain
@@ -22,6 +28,7 @@ var landers: Dictionary = {}
 var indicators: Dictionary = {}
 var preview: MeshInstance3D
 var sun: DirectionalLight3D
+var environment_settings: Environment
 var good_material: StandardMaterial3D
 var bad_material: StandardMaterial3D
 var neutral_material: StandardMaterial3D
@@ -39,14 +46,15 @@ func _ready() -> void:
 	settings.background_mode = Environment.BG_COLOR
 	settings.background_color = Color(0.003, 0.004, 0.007)
 	settings.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	settings.ambient_light_color = Color(0.78, 0.78, 0.8)
-	settings.ambient_light_energy = 0.09
+	settings.ambient_light_color = DAY_AMBIENT_COLOR
+	settings.ambient_light_energy = DAY_AMBIENT_ENERGY
 	settings.tonemap_mode = Environment.TONE_MAPPER_ACES
 	settings.tonemap_exposure = 1.05
 	# Airless sky: no fog/haze; a touch of extra contrast keeps the vacuum look crisp.
 	settings.fog_enabled = false
 	settings.adjustment_enabled = true
 	settings.adjustment_contrast = 1.18
+	environment_settings = settings
 	environment.environment = settings
 	add_child(environment)
 	sun = DirectionalLight3D.new()
@@ -391,8 +399,7 @@ func synchronize(simulation: ColonySimulation) -> void:
 				_create_lander(cell)
 			landers[cell].position = surface_position(cell)
 	sync_landers(simulation)
-	sun.light_energy = 0.22 if simulation.is_night() else DAY_ENERGY
-	sun.light_color = Color(0.55, 0.66, 1.0) if simulation.is_night() else DAY_COLOR
+	sync_lighting(simulation)
 
 
 func show_preview(cell: Vector2i, valid: bool, enabled: bool) -> void:
@@ -422,8 +429,22 @@ func sync_landers(simulation: ColonySimulation) -> void:
 		landers[cell].apply_delivery(simulation.delivery_for_cell(cell))
 
 
+func sync_lighting(simulation: ColonySimulation) -> void:
+	var daylight := simulation.daylight_factor()
+	sun.light_energy = lerpf(NIGHT_ENERGY, DAY_ENERGY, daylight)
+	sun.light_color = NIGHT_COLOR.lerp(DAY_COLOR, daylight)
+	if environment_settings != null:
+		environment_settings.ambient_light_energy = lerpf(
+			NIGHT_AMBIENT_ENERGY, DAY_AMBIENT_ENERGY, daylight
+		)
+		environment_settings.ambient_light_color = NIGHT_AMBIENT_COLOR.lerp(
+			DAY_AMBIENT_COLOR, daylight
+		)
+
+
 func advance_modules(delta: float, simulation: ColonySimulation = null) -> void:
 	for model: LunarModule in models.values():
 		model.advance(delta)
 	if simulation != null:
 		sync_landers(simulation)
+		sync_lighting(simulation)

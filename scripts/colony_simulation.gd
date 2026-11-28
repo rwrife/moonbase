@@ -10,6 +10,9 @@ const NEIGHBORS: Array[Vector2i] = [
 ]
 const STARTING_CREDITS := 1800.0
 const BULLDOZE_COST := 15.0
+const CYCLE_DAYS := 30
+const DAYLIGHT_DAYS := 24
+const TWILIGHT_DAYS := 1.5
 
 const CONDITION_OPERATIONAL := "operational"
 const CONDITION_DAMAGED := "damaged"
@@ -164,7 +167,26 @@ func _sync_delivery_for_pad_state(cell: Vector2i) -> void:
 
 
 func is_night() -> bool:
-	return (day - 1) % 30 >= 20
+	return (day - 1) % CYCLE_DAYS >= DAYLIGHT_DAYS
+
+
+func cycle_day() -> float:
+	return float((day - 1) % CYCLE_DAYS) + clampf(day_accumulator, 0.0, 1.0)
+
+
+## Returns a smooth illumination factor in [0.0, 1.0] (1.0 = full sunlight,
+## 0.0 = full lunar night) with smoothstep dusk/dawn transitions.
+func daylight_factor() -> float:
+	var pos := cycle_day()
+	var dusk_start := float(DAYLIGHT_DAYS) - TWILIGHT_DAYS
+	var dawn_start := float(CYCLE_DAYS) - TWILIGHT_DAYS
+	if pos < dusk_start:
+		return 1.0
+	if pos < float(DAYLIGHT_DAYS):
+		return 1.0 - smoothstep(dusk_start, float(DAYLIGHT_DAYS), pos)
+	if pos < dawn_start:
+		return 0.0
+	return smoothstep(dawn_start, float(CYCLE_DAYS), pos)
 
 
 func is_inside(cell: Vector2i) -> bool:
@@ -533,11 +555,11 @@ func _tick_day() -> void:
 				credits += 24.0
 	credits -= upkeep
 	morale = clampf(morale + (0.5 if crew_safe else -3.0), 0.0, 100.0)
-	if (day - 1) % 30 == 0:
+	if (day - 1) % CYCLE_DAYS == 0:
 		var grant := 300.0 + minf(science * 2.0, 300.0)
 		credits += grant
 		report("Funding board awarded %.0f credits for this cycle." % grant)
-	elif (day - 1) % 30 == 20:
+	elif (day - 1) % CYCLE_DAYS == DAYLIGHT_DAYS:
 		report("Lunar night: solar arrays offline. Check power and heat.")
 	elif not crew_safe:
 		report("Life-support alert: %d/%d crew supplied. Inspect upstream utilities." % [

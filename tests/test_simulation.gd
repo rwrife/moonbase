@@ -69,20 +69,43 @@ func test_connections() -> void:
 
 func test_night_cascade() -> void:
 	var sim := ColonySimulation.new()
-	sim.day = 20
+	var sunlit_days := 0
+	var night_days := 0
+	for d in range(1, ColonySimulation.CYCLE_DAYS + 1):
+		sim.day = d
+		if sim.is_night():
+			night_days += 1
+		else:
+			sunlit_days += 1
+	check(sunlit_days == 24 and night_days == 6,
+		"Day/night cycle must follow an 80/20 split (24 sunlit, 6 night)")
+	sim.day = 1
+	sim.day_accumulator = 0.0
+	check(is_equal_approx(sim.daylight_factor(), 1.0), "Day 1 must begin in full daylight")
+	sim.day = 24
+	sim.day_accumulator = 0.25
+	var mid_dusk := sim.daylight_factor()
+	check(is_equal_approx(mid_dusk, 0.5), "Dusk midpoint must be halfway faded")
+	sim.day = 24
+	sim.day_accumulator = 0.0
 	sim.recalculate()
-	check(not sim.is_night() and sim.safe_crew == 8, "Day 20 should be lit")
+	check(not sim.is_night() and sim.safe_crew == 8, "Day 24 should be lit")
 	var morale := sim.morale
 	sim.tick()
-	check(sim.day == 21 and sim.is_night(), "Night begins on day 21")
+	check(sim.day == 25 and sim.is_night(), "Night begins on day 25")
+	check(is_equal_approx(sim.daylight_factor(), 0.0), "Night start must reach full night lighting")
 	check(sim.safe_crew == 0 and sim.morale == morale - 3, "Night shortage must affect habitat and morale")
 	for utility in ["power", "water", "oxygen", "heat"]:
 		check(sim.totals(utility).x == 0, "Power loss must cascade to " + utility)
 	check(sim.place("reactor", Vector2i(0, 1)), "Build reliable generation")
 	check(sim.safe_crew == 8, "Reactor must restore nighttime life support")
 	sim.day = 30
+	sim.day_accumulator = 0.25
+	check(is_equal_approx(sim.daylight_factor(), 0.5), "Dawn midpoint must be halfway brightened")
+	sim.day_accumulator = 0.0
 	sim.tick()
 	check(sim.day == 31 and not sim.is_night(), "Sunlight resumes on day 31")
+	check(is_equal_approx(sim.daylight_factor(), 1.0), "Sunrise must return to full daylight")
 	check(sim.safe_crew == 8, "Services must remain supplied after transition")
 
 

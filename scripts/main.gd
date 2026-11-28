@@ -1,6 +1,8 @@
 class_name ColonyGame
 extends Node3D
 
+const SECONDS_PER_DAY := 4.0
+
 var simulation := ColonySimulation.new()
 var site: LunarSite
 var camera_rig: IsometricCamera
@@ -45,10 +47,11 @@ func advance(delta: float) -> void:
 	if paused:
 		return
 	# Ignore long background/suspend gaps instead of fast-forwarding the colony.
-	var elapsed := minf(delta, 0.25) * speed
-	simulation.advance(elapsed)
+	var elapsed_seconds := minf(delta, 0.25) * speed
+	var elapsed_days := elapsed_seconds / SECONDS_PER_DAY
+	simulation.advance(elapsed_days)
 	accumulator = simulation.day_accumulator
-	site.advance_modules(elapsed, simulation)
+	site.advance_modules(elapsed_seconds, simulation)
 	hud.update_delivery_status(simulation, selected)
 
 
